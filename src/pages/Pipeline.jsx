@@ -47,14 +47,22 @@ function normalizeStageId(raw) {
 
 const emptyLeadForm = {
   name: '',
-  email: '',
   phone: '',
-  budget: '',
+  email: '',
+
   source: 'Website',
-  interest: '',
+
+  project: '',
+  unit: '',
+  budget: '',
+  investmentType: '',
+
   stage: 'new',
-  notes: '',
+  priority: 'medium',
   lastContactDate: '',
+
+  country: '',
+  notes: '',
 }
 
 export default function Pipeline() {
@@ -113,6 +121,19 @@ export default function Pipeline() {
     const budgetDisplay = row.budget_display ?? row.budgetDisplay ?? row.budget ?? ''
     const lastContactDate = row.last_contact_date ?? row.lastContactDate ?? ''
     const rawStage = row.stage ?? row.stage_id ?? row.stageId ?? row.stage_label ?? row.stageLabel ?? ''
+    const country = row.country ?? row.origin_country ?? row.originCountry ?? ''
+    const investmentType = row.investment_type ?? row.investmentType ?? row.investment ?? ''
+
+    // If interest was stored as a combined string (e.g. "OMMA Villas - Unit 3"), try to split it.
+    let project = interestedIn || ''
+    let unit = interestedUnit || ''
+    if (project && !unit) {
+      const m = String(project).match(/^\s*(.+?)\s*[-–—|•]\s*(Unit\s*\d+)\s*$/i)
+      if (m) {
+        project = m[1]
+        unit = m[2]
+      }
+    }
 
     return {
       uid: `db-${row.id}`,
@@ -122,30 +143,63 @@ export default function Pipeline() {
       email: row.email ?? null,
       phone: row.phone ?? '',
       stage: normalizeStageId(rawStage),
-      priority: row.priority ?? 'medium',
+      priority: normalizePriority(row.priority),
       source: row.source ?? 'Website',
       budgetDisplay,
-      interestedIn,
-      interestedUnit,
+      interestedIn: project || '',
+      interestedUnit: unit || '',
       notes: row.notes ?? '',
       lastContactDate: lastContactDate || '',
       nextActivity: row.next_activity ?? row.nextActivity ?? null,
       nextActivityDisplay: row.next_activity_display ?? row.nextActivityDisplay ?? '',
+      country,
+      investmentType,
     }
   }
+
+  function normalizePriority(raw) {
+    const v = String(raw ?? '').trim().toLowerCase()
+    if (!v) return 'medium'
+    if (v === 'hot') return 'high'
+    if (v === 'warm') return 'medium'
+    if (v === 'cold') return 'low'
+    if (v === 'high' || v === 'medium' || v === 'low') return v
+    return 'medium'
+  }
+
+  const projectOptions = useMemo(() => ([
+    'OMMA Villas',
+    'Tropicalia Breeze',
+    'Tropicalia Villas',
+  ]), [])
+
+  const unitOptions = useMemo(() => {
+    const project = String(form.project || '').trim()
+    const makeUnits = (count, soldOut) => Array.from({ length: count }, (_, i) => {
+      const unitNum = i + 1
+      const label = soldOut ? `Unit ${unitNum} (Sold out)` : `Unit ${unitNum}`
+      return { value: `Unit ${unitNum}`, label, disabled: !!soldOut }
+    })
+    if (project === 'OMMA Villas') return makeUnits(8, false)
+    if (project === 'Tropicalia Breeze') return makeUnits(6, false)
+    if (project === 'Tropicalia Villas') return makeUnits(6, true)
+    return []
+  }, [form.project])
 
   async function fetchLeadsFromSupabase() {
     setError('')
 
-    console.log('Fetching leads from Supabase...')
+    if (import.meta.env.DEV) console.log('Fetching leads from Supabase...')
 
     let res = await supabase.from('leads').select('*').order('created_at', { ascending: false })
     if (res.error && looksLikeMissingColumnError(res.error.message)) {
       res = await supabase.from('leads').select('*')
     }
 
-    console.log('Leads:', res.data)
-    console.log('Error:', res.error)
+    if (import.meta.env.DEV) {
+      console.log('Leads:', res.data)
+      console.log('Error:', res.error)
+    }
 
     if (res.error) {
       const msg = res.error.message || 'Failed to load leads.'
@@ -154,12 +208,14 @@ export default function Pipeline() {
     }
 
     const dbLeads = (res.data || []).map(normalizeDbLead)
-    console.log('Normalized leads:', dbLeads)
-    console.log('Lead count:', dbLeads.length)
-    console.log('Stage distribution:', dbLeads.reduce((acc, l) => {
-      acc[l.stage] = (acc[l.stage] || 0) + 1
-      return acc
-    }, {}))
+    if (import.meta.env.DEV) {
+      console.log('Normalized leads:', dbLeads)
+      console.log('Lead count:', dbLeads.length)
+      console.log('Stage distribution:', dbLeads.reduce((acc, l) => {
+        acc[l.stage] = (acc[l.stage] || 0) + 1
+        return acc
+      }, {}))
+    }
     setLeads(dbLeads)
   }
 
@@ -242,17 +298,22 @@ export default function Pipeline() {
   function openEditModal(lead) {
     setError('')
     setEditingLead(lead)
-    const interestCombined = [lead.interestedIn, lead.interestedUnit].filter(Boolean).join(' - ')
     setForm({
       name: lead.name || '',
-      email: lead.email || '',
       phone: lead.phone || '',
-      budget: lead.budgetDisplay || '',
+      email: lead.email || '',
       source: lead.source || 'Website',
-      interest: interestCombined || '',
+
+      project: lead.interestedIn || '',
+      unit: lead.interestedUnit || '',
+      budget: lead.budgetDisplay || '',
+      investmentType: lead.investmentType || '',
       stage: lead.stage || 'new',
-      notes: lead.notes || '',
+      priority: normalizePriority(lead.priority),
       lastContactDate: lead.lastContactDate || lead.createdAt || '',
+
+      country: lead.country || '',
+      notes: lead.notes || '',
     })
     setShowModal(true)
   }
@@ -272,33 +333,98 @@ export default function Pipeline() {
     navigate(`/activities?lead=${encodeURIComponent(leadName)}`)
   }
 
+  async function upsertLeadWithFallbacks({ isEditing, dbId, payloads }) {
+    let last = null
+    for (const payload of payloads) {
+      let res
+      if (isEditing && dbId) {
+        res = await supabase.from('leads').update(payload).eq('id', dbId).select('*').single()
+      } else {
+        res = await supabase.from('leads').insert(payload).select('*').single()
+      }
+
+      last = res
+      if (!res.error) return res
+      if (looksLikeMissingColumnError(res.error.message)) continue
+      return res
+    }
+    return last
+  }
+
   async function saveLead(e) {
     e.preventDefault()
     setSaving(true)
     setError('')
 
-    const payloadPreferred = {
-      name: form.name.trim(),
-      email: form.email.trim() || null,
-      phone: form.phone.trim() || null,
-      budget: form.budget.trim() || null,
-      source: form.source,
-      interest: form.interest.trim() || null,
-      stage: form.stage,
-      notes: form.notes.trim() || null,
-      last_contact_date: form.lastContactDate || null,
+    const name = form.name.trim()
+    const phone = form.phone.trim()
+    const email = form.email.trim() || null
+
+    if (!name || !phone) {
+      setError('Name and Phone are required.')
+      setSaving(false)
+      return
     }
 
-    const payloadAlt = {
-      name: form.name.trim(),
-      email: form.email.trim() || null,
-      phone: form.phone.trim() || null,
-      budgetDisplay: form.budget.trim() || null,
+    const project = String(form.project || '').trim() || null
+    const unit = String(form.unit || '').trim() || null
+    const budget = String(form.budget || '').trim() || null
+    const investmentType = String(form.investmentType || '').trim() || null
+    const country = String(form.country || '').trim() || null
+    const notes = String(form.notes || '').trim() || null
+
+    const payloadFullSnake = {
+      name,
+      phone,
+      email,
       source: form.source,
-      interestedIn: form.interest.trim() || null,
       stage: form.stage,
-      notes: form.notes.trim() || null,
+      priority: form.priority,
+      last_contact_date: form.lastContactDate || null,
+      interest: project,
+      interested_unit: unit,
+      budget,
+      investment_type: investmentType,
+      country,
+      notes,
+    }
+
+    const payloadSnakeNoExtras = {
+      name,
+      phone,
+      email,
+      source: form.source,
+      stage: form.stage,
+      priority: form.priority,
+      last_contact_date: form.lastContactDate || null,
+      interest: project ? (unit ? `${project} - ${unit}` : project) : null,
+      budget,
+      notes,
+    }
+
+    const payloadCamel = {
+      name,
+      phone,
+      email,
+      source: form.source,
+      stage: form.stage,
+      priority: form.priority,
       lastContactDate: form.lastContactDate || null,
+      interestedIn: project,
+      interestedUnit: unit,
+      budgetDisplay: budget,
+      investmentType,
+      country,
+      notes,
+    }
+
+    const payloadMinimal = {
+      name,
+      phone,
+      email,
+      source: form.source,
+      stage: form.stage,
+      notes,
     }
 
     const isEditing = !!editingLead
@@ -306,18 +432,11 @@ export default function Pipeline() {
     const prevName = editingLead?.name || ''
     const nextName = form.name.trim()
 
-    let res
-    if (isEditing && dbId) {
-      res = await supabase.from('leads').update(payloadPreferred).eq('id', dbId).select('*').single()
-      if (res.error && looksLikeMissingColumnError(res.error.message)) {
-        res = await supabase.from('leads').update(payloadAlt).eq('id', dbId).select('*').single()
-      }
-    } else {
-      res = await supabase.from('leads').insert(payloadPreferred).select('*').single()
-      if (res.error && looksLikeMissingColumnError(res.error.message)) {
-        res = await supabase.from('leads').insert(payloadAlt).select('*').single()
-      }
-    }
+    const res = await upsertLeadWithFallbacks({
+      isEditing,
+      dbId,
+      payloads: [payloadFullSnake, payloadSnakeNoExtras, payloadCamel, payloadMinimal],
+    })
 
     if (res.error) {
       const msg = res.error.message || 'Failed to save lead.'
@@ -400,7 +519,7 @@ export default function Pipeline() {
 
       {/* Pipeline Board */}
       <div className="flex gap-4 overflow-x-auto pb-6">
-        {pipelineStages.filter(s => s.id !== 'lost').map((stage, i) => {
+        {pipelineStages.map((stage, i) => {
           const stageLeads = leads.filter(l => l.stage === stage.id)
           return (
             <div 
@@ -527,43 +646,47 @@ export default function Pipeline() {
               )}
 
               <form onSubmit={saveLead} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div>
-                  <label className="text-xs text-field-stone-light">Name</label>
-                  <input
-                    className="input mt-1"
-                    value={form.name}
-                    onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-                    required
-                  />
+                {/* Required */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-field-stone-light uppercase tracking-wider mb-3">Required</p>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-field-stone-light">Name <span className="text-red-600">*</span></label>
+                      <input
+                        className="input mt-1"
+                        value={form.name}
+                        onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs text-field-stone-light">Phone <span className="text-red-600">*</span></label>
+                        <input
+                          className="input mt-1"
+                          value={form.phone}
+                          onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+                          placeholder="+62 8xx xxx xxxx"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-field-stone-light">Email</label>
+                        <input
+                          type="email"
+                          className="input mt-1"
+                          value={form.email}
+                          onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+                          placeholder="name@email.com"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs text-field-stone-light">Email</label>
-                    <input
-                      type="email"
-                      className="input mt-1"
-                      value={form.email}
-                      onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-field-stone-light">Phone</label>
-                    <input
-                      className="input mt-1"
-                      value={form.phone}
-                      onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-field-stone-light">Budget</label>
-                    <input
-                      className="input mt-1"
-                      value={form.budget}
-                      onChange={(e) => setForm(f => ({ ...f, budget: e.target.value }))}
-                      placeholder="$130K"
-                    />
-                  </div>
+                {/* Lead Source */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-field-stone-light uppercase tracking-wider mb-3">Lead Source</p>
                   <div>
                     <label className="text-xs text-field-stone-light">Source</label>
                     <select
@@ -571,51 +694,153 @@ export default function Pipeline() {
                       value={form.source}
                       onChange={(e) => setForm(f => ({ ...f, source: e.target.value }))}
                     >
-                      <option value="Website">Website</option>
-                      <option value="Instagram">Instagram</option>
-                      <option value="Referral">Referral</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs text-field-stone-light">Interest</label>
-                    <input
-                      className="input mt-1"
-                      value={form.interest}
-                      onChange={(e) => setForm(f => ({ ...f, interest: e.target.value }))}
-                      placeholder="Which property/unit?"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs text-field-stone-light">Stage</label>
-                    <select
-                      className="input mt-1"
-                      value={form.stage}
-                      onChange={(e) => setForm(f => ({ ...f, stage: e.target.value }))}
-                    >
-                      {pipelineStages.filter(s => s.id !== 'lost').map(s => (
-                        <option key={s.id} value={s.id}>{s.label}</option>
+                      {['Instagram', 'Facebook', 'Website', 'Referral', 'Agent', 'Walk-in', 'WhatsApp', 'Other'].map(s => (
+                        <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs text-field-stone-light">Last contact date</label>
-                    <input
-                      type="date"
-                      className="input mt-1"
-                      value={form.lastContactDate || ''}
-                      onChange={(e) => setForm(f => ({ ...f, lastContactDate: e.target.value }))}
-                    />
+                </div>
+
+                {/* Interest */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-field-stone-light uppercase tracking-wider mb-3">Interest</p>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs text-field-stone-light">Project</label>
+                      <select
+                        className="input mt-1"
+                        value={form.project}
+                        onChange={(e) => {
+                          const nextProject = e.target.value
+                          setForm(f => {
+                            const next = { ...f, project: nextProject }
+                            // reset unit if it doesn't apply
+                            next.unit = ''
+                            return next
+                          })
+                        }}
+                      >
+                        <option value="">Select project…</option>
+                        {projectOptions.map(p => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-field-stone-light">Unit</label>
+                      <select
+                        className="input mt-1"
+                        value={form.unit}
+                        onChange={(e) => setForm(f => ({ ...f, unit: e.target.value }))}
+                        disabled={!form.project}
+                      >
+                        <option value="">{form.project ? 'Select unit…' : 'Select a project first…'}</option>
+                        {unitOptions.map(u => (
+                          <option key={u.value} value={u.value} disabled={u.disabled}>
+                            {u.label}
+                          </option>
+                        ))}
+                      </select>
+                      {form.project === 'Tropicalia Villas' && (
+                        <p className="text-[11px] text-field-stone mt-1">Tropicalia Villas is sold out.</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs text-field-stone-light">Budget</label>
+                      <select
+                        className="input mt-1"
+                        value={form.budget}
+                        onChange={(e) => setForm(f => ({ ...f, budget: e.target.value }))}
+                      >
+                        <option value="">Select budget…</option>
+                        {['$100K-130K', '$130K-200K', '$200K-300K', '$300K+'].map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-field-stone-light">Investment Type</label>
+                      <select
+                        className="input mt-1"
+                        value={form.investmentType}
+                        onChange={(e) => setForm(f => ({ ...f, investmentType: e.target.value }))}
+                      >
+                        <option value="">Select type…</option>
+                        {['Personal Use', 'Rental Investment', 'Resale'].map(t => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-xs text-field-stone-light">Notes</label>
-                  <textarea
-                    className="input mt-1 min-h-[90px]"
-                    value={form.notes}
-                    onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
-                  />
+                {/* Qualification */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-field-stone-light uppercase tracking-wider mb-3">Qualification</p>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="sm:col-span-2">
+                      <label className="text-xs text-field-stone-light">Stage</label>
+                      <select
+                        className="input mt-1"
+                        value={form.stage}
+                        onChange={(e) => setForm(f => ({ ...f, stage: e.target.value }))}
+                      >
+                        <option value="new">New Lead</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="qualified">Qualified</option>
+                        <option value="pdf_sent">PDF Sent</option>
+                        <option value="site_visit">Site Visit</option>
+                        <option value="negotiating">Negotiating</option>
+                        <option value="won">Closed Won</option>
+                        <option value="lost">Closed Lost</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-field-stone-light">Priority</label>
+                      <select
+                        className="input mt-1"
+                        value={form.priority}
+                        onChange={(e) => setForm(f => ({ ...f, priority: e.target.value }))}
+                      >
+                        <option value="high">Hot</option>
+                        <option value="medium">Warm</option>
+                        <option value="low">Cold</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-field-stone-light">Last Contact Date</label>
+                      <input
+                        type="date"
+                        className="input mt-1"
+                        value={form.lastContactDate || ''}
+                        onChange={(e) => setForm(f => ({ ...f, lastContactDate: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Additional */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-field-stone-light uppercase tracking-wider mb-3">Additional</p>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-field-stone-light">Country</label>
+                      <input
+                        className="input mt-1"
+                        value={form.country}
+                        onChange={(e) => setForm(f => ({ ...f, country: e.target.value }))}
+                        placeholder="Australia"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-field-stone-light">Notes</label>
+                      <textarea
+                        className="input mt-1 min-h-[90px]"
+                        value={form.notes}
+                        onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-2">
