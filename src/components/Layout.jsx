@@ -611,15 +611,15 @@ export default function Layout() {
               className={clsx(
                 "rounded-2xl shadow-2xl border-2 p-4",
                 reminderBuckets.urgent.length > 0
-                  ? "bg-red-600 border-red-400 text-white animate-pulse"
-                  : "bg-orange-400 border-orange-300 text-black"
+                  ? "bg-red-100 border-red-300 text-red-800 animate-pulse"
+                  : "bg-orange-100 border-orange-300 text-orange-800"
               )}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className={clsx(
                     "font-extrabold tracking-wide",
-                    reminderBuckets.urgent.length > 0 ? "text-white text-lg" : "text-black text-base"
+                    reminderBuckets.urgent.length > 0 ? "text-red-800 text-lg" : "text-orange-800 text-base"
                   )}>
                     {reminderBuckets.anyOverdue
                       ? '⚠️ OVERDUE REMINDER'
@@ -629,7 +629,7 @@ export default function Layout() {
                   </p>
                   <p className={clsx(
                     "mt-1",
-                    reminderBuckets.urgent.length > 0 ? "text-white/90 text-sm" : "text-black/80 text-sm"
+                    reminderBuckets.urgent.length > 0 ? "text-red-800/80 text-sm" : "text-orange-800/80 text-sm"
                   )}>
                     {reminderBuckets.urgent.length > 0
                       ? `You have ${reminderBuckets.urgent.length} urgent reminder${reminderBuckets.urgent.length === 1 ? '' : 's'} that need attention.`
@@ -640,7 +640,7 @@ export default function Layout() {
                   type="button"
                   className={clsx(
                     "px-2 py-1 rounded-lg font-bold",
-                    reminderBuckets.urgent.length > 0 ? "text-white/90 hover:text-white" : "text-black/70 hover:text-black"
+                    reminderBuckets.urgent.length > 0 ? "text-red-800/80 hover:text-red-800" : "text-orange-800/70 hover:text-orange-800"
                   )}
                   onClick={() => setReminderBannerDismissed(true)}
                   aria-label="Dismiss reminders banner"
@@ -654,8 +654,8 @@ export default function Layout() {
                   className={clsx(
                     "px-3 py-2 rounded-lg font-semibold",
                     reminderBuckets.urgent.length > 0
-                      ? "bg-white/15 hover:bg-white/25 text-white"
-                      : "bg-white/50 hover:bg-white/70 text-black"
+                      ? "bg-red-200 hover:bg-red-300 text-red-800"
+                      : "bg-orange-200 hover:bg-orange-300 text-orange-800"
                   )}
                   onClick={() => navigate('/activities')}
                 >
@@ -687,15 +687,15 @@ export default function Layout() {
           >
             <div
               style={{
-                backgroundColor: '#b91c1c',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
                 borderRadius: '12px',
                 padding: '22px',
                 width: '100%',
                 maxWidth: '640px',
                 maxHeight: '85vh',
                 overflowY: 'auto',
-                color: '#fff',
-                border: '2px solid rgba(255,255,255,0.25)',
+                color: '#991b1b',
+                border: '2px solid rgba(239, 68, 68, 0.5)',
               }}
             >
               <div className="flex items-start justify-between gap-4">
@@ -703,7 +703,7 @@ export default function Layout() {
                   <h2 className="font-display text-2xl sm:text-3xl font-extrabold mt-1">
                     ⚠️ OVERDUE REMINDER
                   </h2>
-                  <p className="text-sm sm:text-base text-white/90 mt-2">
+                  <p className="text-sm sm:text-base text-red-800/80 mt-2">
                     You have {reminderBuckets.urgent.length} reminder{reminderBuckets.urgent.length === 1 ? '' : 's'} that need attention!
                   </p>
                 </div>
@@ -721,19 +721,19 @@ export default function Layout() {
                     }}
                     className={clsx(
                       "w-full text-left rounded-xl border p-4",
-                      "bg-white/10 border-white/25 hover:bg-white/15"
+                      "bg-red-100 border-red-300 hover:bg-red-200"
                     )}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <p className="font-semibold truncate text-white">
+                        <p className="font-semibold truncate text-red-800">
                           {r.title}
                         </p>
-                        <p className="text-sm mt-1 truncate text-white/90">
+                        <p className="text-sm mt-1 truncate text-red-800/80">
                           {r.leadName ? `Lead: ${r.leadName} · ` : ''}{r.reminderDate}{r.reminderTime ? ` · ${r.reminderTime}` : ''}
                         </p>
                       </div>
-                      <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-white text-red-700">
+                      <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-red-200 text-red-800">
                         {r.overdue ? 'Overdue' : 'Due Today'}
                       </span>
                     </div>
@@ -744,7 +744,7 @@ export default function Layout() {
               <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="bg-white/15 hover:bg-white/25 text-white rounded-lg font-semibold px-4 py-3"
+                  className="bg-red-200 hover:bg-red-300 text-red-800 rounded-lg font-semibold px-4 py-3"
                   onClick={() => {
                     setReminderGateDismissed(true)
                     setReminderGateOpen(false)
@@ -754,7 +754,7 @@ export default function Layout() {
                 </button>
                 <button
                   type="button"
-                  className="bg-white text-red-700 hover:bg-white/90 rounded-lg font-extrabold px-4 py-3"
+                  className="bg-red-200 hover:bg-red-300 text-red-800 rounded-lg font-extrabold px-4 py-3"
                   onClick={() => {
                     setReminderGateDismissed(true)
                     setReminderGateOpen(false)

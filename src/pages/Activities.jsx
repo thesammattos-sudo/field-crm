@@ -545,7 +545,11 @@ export default function Activities() {
                               type="checkbox"
                               className="h-5 w-5 rounded border-gray-300 accent-field-black"
                               checked={!!activity.completed}
-                              onChange={() => toggleCompleted(activity)}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                e.stopPropagation()
+                                toggleCompleted(activity)
+                              }}
                               aria-label="Mark complete"
                             />
 

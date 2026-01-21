@@ -376,17 +376,17 @@ export default function Dashboard() {
     <div className="space-y-6 lg:space-y-8 animate-fade-in">
       {/* REMINDERS (top priority) */}
       {attentionReminders.length > 0 && (
-        <div className="rounded-2xl border-2 border-red-500 bg-red-600 p-5 text-white">
+        <div className="rounded-2xl border-2 border-red-300 bg-red-100 p-5 text-red-800">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h2 className="font-display text-xl font-extrabold tracking-wide text-white">
+              <h2 className="font-display text-xl font-extrabold tracking-wide text-red-800">
                 ⚠️ REMINDERS
               </h2>
-              <p className="text-sm text-white/90 mt-1">
+              <p className="text-sm text-red-800/80 mt-1">
                 {attentionReminders.length} reminder{attentionReminders.length === 1 ? '' : 's'} need attention.
               </p>
             </div>
-            <Link to="/activities" className="text-sm font-semibold text-red-900 hover:underline">
+            <Link to="/activities" className="text-sm font-semibold text-red-800 hover:underline">
               View all →
             </Link>
           </div>
@@ -401,19 +401,19 @@ export default function Dashboard() {
                   to={`/activities?activity=${encodeURIComponent(String(r.id))}`}
                   className={clsx(
                     "block rounded-xl border p-4 transition-transform hover:-translate-y-0.5 hover:shadow-lg",
-                    "bg-red-700/80 border-red-300 animate-pulse"
+                    "bg-red-100 border-red-300 animate-pulse"
                   )}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <p className="font-semibold truncate text-white">
+                      <p className="font-semibold truncate text-red-800">
                         {r.title}
                       </p>
-                      <p className="text-sm mt-1 truncate text-white/90">
+                      <p className="text-sm mt-1 truncate text-red-800/80">
                         {r.leadName ? `Lead: ${r.leadName} · ` : ''}{dateLabel} · {timeLabel}
                       </p>
                     </div>
-                    <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-white text-red-700">
+                    <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-red-200 text-red-800">
                       {r.overdue ? 'Overdue' : 'Due Today'}
                     </span>
                   </div>
@@ -638,27 +638,27 @@ export default function Dashboard() {
                       className={clsx(
                         "block p-4 rounded-xl border transition-transform hover:-translate-y-0.5 hover:shadow-lg",
                         urgent
-                          ? "bg-red-600 border-red-500 text-white animate-pulse"
+                          ? "bg-red-100 border-red-300 text-red-800 animate-pulse"
                           : r.dueSoon
-                            ? "bg-orange-100 border-orange-300"
+                            ? "bg-orange-100 border-orange-300 text-orange-800"
                             : "bg-field-sand border-gray-200"
                       )}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className={clsx("text-sm font-semibold truncate", urgent ? "text-white" : "text-field-black")}>
+                          <p className={clsx("text-sm font-semibold truncate", urgent ? "text-red-800" : r.dueSoon ? "text-orange-800" : "text-field-black")}>
                             {r.title}
                           </p>
-                          <p className={clsx("text-xs mt-1 truncate", urgent ? "text-white/90" : "text-field-stone")}>
+                          <p className={clsx("text-xs mt-1 truncate", urgent ? "text-red-800/80" : r.dueSoon ? "text-orange-800/80" : "text-field-stone")}>
                             {r.leadName ? `Lead: ${r.leadName} · ` : ''}{dateLabel} · {timeLabel}
                           </p>
                         </div>
                         <span className={clsx(
                           "text-[10px] font-extrabold uppercase tracking-wide px-2.5 py-1 rounded-full flex-shrink-0",
                           urgent
-                            ? "bg-white text-red-700"
+                            ? "bg-red-200 text-red-800"
                             : r.dueSoon
-                              ? "bg-orange-500 text-white"
+                              ? "bg-orange-200 text-orange-800"
                               : "bg-white border border-gray-200 text-field-stone"
                         )}>
                           {urgent ? (r.overdue ? 'Overdue' : 'Today') : (r.dueSoon ? 'Next 2 days' : 'Later')}
