@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Menu, Home, Users, Building2, Truck, Package, FileText, CheckSquare, Settings, Search, LogOut, ArrowRight } from 'lucide-react'
+import { Menu, Home, Users, Building2, Truck, Package, FileText, CheckSquare, Settings, Search, LogOut, ArrowRight, BarChart3 } from 'lucide-react'
 import { activities } from '../data'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
@@ -18,6 +18,9 @@ const navItems = [
     { path: '/suppliers', label: 'Suppliers', icon: Truck },
     { path: '/materials', label: 'Materials', icon: Package },
     { path: '/documents', label: 'Documents', icon: FileText },
+  ]},
+  { section: 'TRENDS', items: [
+    { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   ]},
   { section: 'TASKS', items: [
     { path: '/activities', label: 'Activities', icon: CheckSquare, badge: activities.filter(a => !a.done && a.timeDisplay.includes('Today')).length },

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Users, DollarSign, Building2, Calendar, ArrowRight, Phone, CheckCircle2, FileText } from 'lucide-react'
+import { Users, DollarSign, ArrowRight, Phone, CheckCircle2, FileText, CheckSquare, AlertTriangle } from 'lucide-react'
 import { projects as initialProjects, leads as initialLeads, pipelineStages, companyInfo } from '../data'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
@@ -33,6 +33,24 @@ function formatUsdCompact(amount) {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`
   return `$${Math.round(n).toLocaleString()}`
+}
+
+function parseBudgetForTotal(value) {
+  if (value == null) return 0
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  const s = String(value).trim()
+  if (!s) return 0
+
+  // Handle ranges like "$100K-130K"
+  const parts = s.replace(/\s+/g, '').split('-')
+  const pick = parts.length >= 2 ? parts[1] : parts[0]
+  // Handle "+": "$300K+"
+  const cleaned = pick.replace('+', '')
+  const lower = cleaned.toLowerCase()
+  const multiplier = lower.includes('m') ? 1_000_000 : lower.includes('k') ? 1_000 : 1
+  const m = lower.replace(/,/g, '').match(/(\d+(\.\d+)?)/)
+  const num = m ? Number(m[1]) : 0
+  return Number.isFinite(num) ? num * multiplier : 0
 }
 
 function parseMonthYear(value) {
@@ -240,6 +258,7 @@ export default function Dashboard() {
       name: l.name || '',
       stage: l.stage || 'new',
       budget: l.budget ?? l.budget_display ?? l.budgetDisplay ?? 0,
+      lastContactDate: l.last_contact_date ?? l.lastContactDate ?? null,
     }))
   }, [leads])
 
@@ -260,6 +279,20 @@ export default function Dashboard() {
         type: a.type || 'follow_up',
       }))
   }, [activities])
+
+  const tasksDueTodayTotal = useMemo(() => todayActivities.length, [todayActivities])
+  const tasksDueTodayPending = useMemo(() => todayActivities.filter(a => !a.done).length, [todayActivities])
+
+  const followUpsNeeded = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 7)
+    return normalizedLeads.filter(l => {
+      if (!l.lastContactDate) return true
+      const d = new Date(l.lastContactDate)
+      if (Number.isNaN(d.getTime())) return true
+      return d.getTime() <= cutoff.getTime()
+    }).length
+  }, [normalizedLeads])
 
   const reminderRows = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
@@ -320,42 +353,16 @@ export default function Dashboard() {
     return reminderRows
   }, [reminderRows])
 
-  const activeLeads = useMemo(() => {
-    return normalizedLeads.filter(l => !['won', 'lost'].includes(l.stage))
+  const pipelineValueAll = useMemo(() => {
+    return normalizedLeads.reduce((sum, l) => sum + parseBudgetForTotal(l.budget), 0)
   }, [normalizedLeads])
 
-  const pipelineValue = useMemo(() => {
-    return activeLeads.reduce((sum, l) => sum + parseMoneyLike(l.budget), 0)
-  }, [activeLeads])
-
-  const unitsAvailable = useMemo(() => {
-    return normalizedProjects.reduce((sum, p) => sum + (Number(p.availableUnits) || 0), 0)
-  }, [normalizedProjects])
-
-  const unitsTotal = useMemo(() => {
-    return normalizedProjects.reduce((sum, p) => sum + (Number(p.totalUnits) || 0), 0)
-  }, [normalizedProjects])
-
-  const nextCompletion = useMemo(() => {
-    const now = new Date()
-    const candidates = normalizedProjects
-      .map(p => ({ ...p, d: p.completionDate }))
-      .filter(p => p.d && !Number.isNaN(p.d.getTime()))
-      .sort((a, b) => a.d.getTime() - b.d.getTime())
-    const upcoming = candidates.find(p => p.d.getTime() >= now.getTime()) || candidates[0]
-    if (!upcoming) return null
-    return {
-      label: upcoming.name,
-      value: format(upcoming.d, 'MMM yy'),
-    }
-  }, [normalizedProjects])
-
   const stats = useMemo(() => ([
-    { label: 'Active Leads', value: activeLeads.length, change: `${normalizedLeads.length} total`, trend: 'neutral', icon: Users, to: '/pipeline' },
-    { label: 'Pipeline Value', value: formatUsdCompact(pipelineValue), change: `${activeLeads.length} leads`, trend: 'neutral', icon: DollarSign, to: '/pipeline' },
-    { label: 'Units Available', value: `${unitsAvailable}`, change: `of ${unitsTotal}`, trend: 'neutral', icon: Building2, to: '/projects' },
-    { label: 'Next Completion', value: nextCompletion?.value || '—', change: nextCompletion?.label || '—', trend: 'neutral', icon: Calendar, to: '/projects' },
-  ]), [activeLeads.length, normalizedLeads.length, pipelineValue, unitsAvailable, unitsTotal, nextCompletion])
+    { label: 'Active Leads', value: normalizedLeads.length, change: 'All leads', trend: 'neutral', icon: Users, to: '/pipeline' },
+    { label: 'Pipeline Value', value: formatUsdCompact(pipelineValueAll), change: `${normalizedLeads.length} leads`, trend: 'neutral', icon: DollarSign, to: '/pipeline' },
+    { label: 'Tasks Due Today', value: `${tasksDueTodayTotal}`, change: `${tasksDueTodayPending} pending`, trend: 'neutral', icon: CheckSquare, to: '/activities' },
+    { label: 'Follow-ups Needed', value: `${followUpsNeeded}`, change: 'No contact in 7+ days', trend: 'neutral', icon: AlertTriangle, to: '/pipeline' },
+  ]), [normalizedLeads.length, pipelineValueAll, tasksDueTodayTotal, tasksDueTodayPending, followUpsNeeded])
 
   const projectsByCompletion = useMemo(() => {
     return [...normalizedProjects].sort((a, b) => {

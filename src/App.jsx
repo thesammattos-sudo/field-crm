@@ -10,6 +10,7 @@ import Materials from './pages/Materials'
 import Documents from './pages/Documents'
 import Activities from './pages/Activities'
 import Login from './pages/Login'
+import Analytics from './pages/Analytics'
 
 function App() {
   return (
@@ -27,6 +28,8 @@ function App() {
           <Route path="materials" element={<Materials />} />
           <Route path="documents" element={<Documents />} />
           <Route path="activities" element={<Activities />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="trends" element={<Navigate to="/analytics" replace />} />
         </Route>
       </Route>
 
