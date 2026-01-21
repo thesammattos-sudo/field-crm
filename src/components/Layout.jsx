@@ -257,7 +257,14 @@ export default function Layout() {
         <div className="flex flex-col h-full">
           {/* Header */}
           <div className="pt-6 pb-2 px-4 border-b border-gray-200">
-            <img src="/field-logo.png" alt="Field Property" className="h-16 w-auto" />
+            <a
+              href="https://www.fieldpropertybali.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block"
+            >
+              <img src="/field-logo.png" alt="Field Property" className="h-16 w-auto" />
+            </a>
           </div>
 
           {/* Navigation */}
