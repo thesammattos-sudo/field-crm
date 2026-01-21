@@ -5,7 +5,6 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import ModalPortal from '../components/ModalPortal'
 import ConfirmDialog from '../components/ConfirmDialog'
-import { projects as seedProjects } from '../data'
 
 const getActivityIcon = (type) => {
   const icons = {
@@ -85,12 +84,13 @@ export default function Activities() {
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
 
-  // Options for dropdowns (we save names as text).
-  const [leadOptions, setLeadOptions] = useState([])
-  const [projectOptions, setProjectOptions] = useState(() => {
-    const names = (seedProjects || []).map(p => p?.name).filter(Boolean)
-    return Array.from(new Set(names)).map((name) => ({ id: name, name }))
-  })
+  // Dropdown data (we save names as text).
+  const [leads, setLeads] = useState([])
+  const projectOptions = useMemo(() => ([
+    'OMMA Villas',
+    'Tropicalia Breeze',
+    'Tropicalia Villas',
+  ]), [])
 
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -127,30 +127,13 @@ export default function Activities() {
   }, [])
 
   useEffect(() => {
-    // Fetch leads/projects for dropdowns. If tables don't exist, keep dropdowns empty.
+    // Fetch leads when the modal opens (so dropdown isn't empty).
+    if (!showModal) return
     ;(async () => {
-      const leadsRes = await supabase.from('leads').select('id,name')
-      if (!leadsRes.error && Array.isArray(leadsRes.data) && leadsRes.data.length) {
-        setLeadOptions(leadsRes.data.filter(l => l?.name).map(l => ({ id: String(l.id), name: l.name })))
-      }
-      const projectsRes = await supabase.from('projects').select('id,name')
-      if (!projectsRes.error && Array.isArray(projectsRes.data) && projectsRes.data.length) {
-        const db = projectsRes.data.filter(p => p?.name).map(p => ({ id: String(p.id), name: p.name }))
-        setProjectOptions(prev => {
-          const merged = [...(prev || []), ...db]
-          const seen = new Set()
-          const out = []
-          for (const item of merged) {
-            const key = String(item.name).trim().toLowerCase()
-            if (!key || seen.has(key)) continue
-            seen.add(key)
-            out.push(item)
-          }
-          return out
-        })
-      }
+      const { data } = await supabase.from('leads').select('id,name')
+      setLeads((data || []).filter(l => l?.name))
     })()
-  }, [])
+  }, [showModal])
 
   const filteredActivities = useMemo(() => {
     return activities.filter(a => {
@@ -562,8 +545,8 @@ export default function Activities() {
                       onChange={(e) => setForm(f => ({ ...f, leadName: e.target.value }))}
                     >
                       <option value="">Select a lead…</option>
-                      {leadOptions.map(l => (
-                        <option key={l.id} value={l.name}>{l.name}</option>
+                      {leads.map((lead) => (
+                        <option key={lead.id} value={lead.name}>{lead.name}</option>
                       ))}
                     </select>
                   </div>
@@ -577,8 +560,8 @@ export default function Activities() {
                       onChange={(e) => setForm(f => ({ ...f, projectName: e.target.value }))}
                     >
                       <option value="">Select a project…</option>
-                      {projectOptions.map(p => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
+                      {projectOptions.map((project) => (
+                        <option key={project} value={project}>{project}</option>
                       ))}
                     </select>
                   </div>
