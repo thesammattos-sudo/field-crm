@@ -107,6 +107,11 @@ export default function Activities() {
     return String(lead || '').trim()
   }, [location.search])
 
+  const activityIdParam = useMemo(() => {
+    const id = new URLSearchParams(location.search).get('activity')
+    return String(id || '').trim()
+  }, [location.search])
+
   const leadFilterKey = useMemo(() => leadFilter.toLowerCase(), [leadFilter])
 
   async function fetchActivities() {
@@ -136,6 +141,22 @@ export default function Activities() {
   useEffect(() => {
     fetchActivities()
   }, [])
+
+  // If navigated here with ?activity=<id>, open that activity automatically.
+  useEffect(() => {
+    if (!activityIdParam) return
+    if (loading) return
+    const target = activities.find(a => String(a?.id || '') === activityIdParam)
+    if (!target) return
+
+    // Ensure the group is expanded so it's visible.
+    const group = String(target.leadName || '').trim() || 'General'
+    setCollapsedGroups(prev => ({ ...prev, [group]: false }))
+    // Ensure the list isn't filtered out.
+    setFilter('all')
+    openEditModal(target)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activityIdParam, loading, activities])
 
   useEffect(() => {
     // Fetch leads when the modal opens (so dropdown isn't empty).

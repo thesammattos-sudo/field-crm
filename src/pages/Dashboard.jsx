@@ -5,7 +5,6 @@ import { projects as initialProjects, leads as initialLeads, pipelineStages, com
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { format, formatDistanceToNow } from 'date-fns'
-import ModalPortal from '../components/ModalPortal'
 
 function looksLikeMissingRelationError(message, table) {
   if (!message) return false
@@ -103,8 +102,6 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showOverdueToast, setShowOverdueToast] = useState(false)
-  const [overdueToastCount, setOverdueToastCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -264,64 +261,55 @@ export default function Dashboard() {
       }))
   }, [activities])
 
-  const upcomingReminders = useMemo(() => {
-    const now = new Date()
-    const next24 = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  const attentionReminders = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd')
 
-    function getReminderAt(a) {
-      const enabled = a?.reminder_enabled ?? a?.reminderEnabled ?? false
-      if (!enabled) return null
-
-      const baseDate = a?.reminder_date ?? a?.reminderDate ?? a?.due_date ?? a?.dueDate ?? a?.time ?? null
-      if (!baseDate) return null
-
-      const datePart = String(baseDate).slice(0, 10) // yyyy-mm-dd
-      const t = String(a?.reminder_time ?? a?.reminderTime ?? '00:00')
-      const [hh, mm] = t.split(':')
-      const H = Number(hh) || 0
-      const M = Number(mm) || 0
-
-      const [Y, Mo, D] = datePart.split('-').map(x => Number(x))
-      if (!Y || !Mo || !D) return null
-      const dt = new Date(Y, Mo - 1, D, H, M, 0, 0)
-      return Number.isNaN(dt.getTime()) ? null : dt
+    function isCompleted(a) {
+      return !!(a?.completed ?? a?.done ?? false)
     }
 
     const rows = (activities || [])
       .map(a => {
-        const reminderAt = getReminderAt(a)
-        if (!reminderAt) return null
-        const overdue = reminderAt.getTime() <= now.getTime()
-        const within24 = reminderAt.getTime() <= next24.getTime()
-        if (!overdue && !within24) return null
+        const enabled = a?.reminder_enabled ?? a?.reminderEnabled ?? false
+        if (!enabled) return null
+        if (isCompleted(a)) return null
+
+        const reminderDate = String(a?.reminder_date ?? a?.reminderDate ?? '').slice(0, 10)
+        if (!reminderDate) return null
+        if (reminderDate > today) return null
+
+        const reminderTime = String(a?.reminder_time ?? a?.reminderTime ?? '').trim()
         const title = a?.title || a?.subject || 'Activity'
-        const due = a?.due_date ?? a?.dueDate ?? a?.time ?? null
+        const leadName = a?.lead_name ?? a?.leadName ?? a?.lead ?? ''
+        const id = a?.id
+        if (id == null) return null
+
+        const overdue = reminderDate < today
+        const dueToday = reminderDate === today
         return {
-          id: a?.id,
+          id,
           title,
-          due,
-          reminderAt,
+          leadName: leadName ? String(leadName) : '',
+          reminderDate,
+          reminderTime,
           overdue,
+          dueToday,
         }
       })
       .filter(Boolean)
-      .sort((a, b) => a.reminderAt.getTime() - b.reminderAt.getTime())
+      .sort((x, y) => {
+        // overdue first
+        if (x.overdue !== y.overdue) return x.overdue ? -1 : 1
+        // then due today
+        if (x.dueToday !== y.dueToday) return x.dueToday ? -1 : 1
+        // then time
+        const xt = x.reminderTime || '00:00'
+        const yt = y.reminderTime || '00:00'
+        return xt.localeCompare(yt)
+      })
 
     return rows
   }, [activities])
-
-  const overdueRemindersCount = useMemo(() => {
-    return upcomingReminders.filter(r => r.overdue).length
-  }, [upcomingReminders])
-
-  useEffect(() => {
-    if (loading) return
-    if (overdueRemindersCount <= 0) return
-    setOverdueToastCount(overdueRemindersCount)
-    setShowOverdueToast(true)
-    const t = window.setTimeout(() => setShowOverdueToast(false), 6500)
-    return () => window.clearTimeout(t)
-  }, [loading, overdueRemindersCount])
 
   const activeLeads = useMemo(() => {
     return normalizedLeads.filter(l => !['won', 'lost'].includes(l.stage))
@@ -370,6 +358,61 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 lg:space-y-8 animate-fade-in">
+      {/* REMINDERS (top priority) */}
+      {attentionReminders.length > 0 && (
+        <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="font-display text-xl font-extrabold tracking-wide text-red-900">
+                ⚠️ REMINDERS
+              </h2>
+              <p className="text-sm text-red-900/80 mt-1">
+                {attentionReminders.length} reminder{attentionReminders.length === 1 ? '' : 's'} need attention.
+              </p>
+            </div>
+            <Link to="/activities" className="text-sm font-semibold text-red-900 hover:underline">
+              View all →
+            </Link>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {attentionReminders.map((r) => {
+              const dateLabel = r.reminderDate ? format(new Date(r.reminderDate), 'MMM d, yyyy') : '—'
+              const timeLabel = r.reminderTime ? r.reminderTime : '—'
+              return (
+                <Link
+                  key={String(r.id)}
+                  to={`/activities?activity=${encodeURIComponent(String(r.id))}`}
+                  className={clsx(
+                    "block rounded-xl border p-4 transition-transform hover:-translate-y-0.5 hover:shadow-lg",
+                    r.overdue
+                      ? "bg-red-100 border-red-400 ring-2 ring-red-500 animate-pulse"
+                      : "bg-orange-100 border-orange-300 ring-2 ring-orange-400"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className={clsx("font-semibold truncate", r.overdue ? "text-red-900" : "text-orange-900")}>
+                        {r.title}
+                      </p>
+                      <p className={clsx("text-sm mt-1 truncate", r.overdue ? "text-red-900/80" : "text-orange-900/80")}>
+                        {r.leadName ? `Lead: ${r.leadName} · ` : ''}{dateLabel} · {timeLabel}
+                      </p>
+                    </div>
+                    <span className={clsx(
+                      "text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0",
+                      r.overdue ? "bg-red-600 text-white" : "bg-orange-500 text-white"
+                    )}>
+                      {r.overdue ? 'Overdue' : 'Due Today'}
+                    </span>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
@@ -560,49 +603,6 @@ export default function Dashboard() {
 
         {/* Right Column - 2 cols */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Upcoming Reminders */}
-          <div className="card-static p-5">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-semibold">Upcoming Reminders</h2>
-              <Link to="/activities" className="text-sm text-field-black font-medium hover:underline">View all →</Link>
-            </div>
-
-            {upcomingReminders.length === 0 ? (
-              <div className="text-sm text-field-stone py-4 text-center">
-                {loading ? 'Loading…' : 'No reminders in the next 24 hours'}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {upcomingReminders.map((r) => {
-                  const dueLabel = r.due ? format(new Date(r.due), 'MMM d, yyyy') : 'No due date'
-                  const reminderLabel = r.reminderAt ? format(r.reminderAt, 'MMM d, HH:mm') : ''
-                  return (
-                    <div
-                      key={`${r.id}-${reminderLabel}`}
-                      className={clsx(
-                        "p-3 rounded-lg border flex items-start justify-between gap-3",
-                        r.overdue
-                          ? "bg-orange-50 border-orange-200 dark:bg-[#3a2a1a] dark:border-[#5a3a1a]"
-                          : "bg-field-sand border-gray-200"
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-field-black truncate">{r.title}</p>
-                        <p className="text-xs text-field-stone mt-1">
-                          Due: {dueLabel}
-                          {reminderLabel ? ` · Reminder: ${reminderLabel}` : ''}
-                        </p>
-                      </div>
-                      <Link to="/activities" className="btn-secondary !px-3 !py-2">
-                        View
-                      </Link>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
           {/* Today's Tasks */}
           <div className="card-static p-5">
             <div className="flex justify-between items-center mb-4">
@@ -724,34 +724,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {showOverdueToast && overdueToastCount > 0 && (
-        <ModalPortal>
-          <div
-            style={{
-              position: 'fixed',
-              top: 16,
-              right: 16,
-              zIndex: 9999,
-              maxWidth: 420,
-              width: 'calc(100vw - 32px)',
-            }}
-          >
-            <div className="rounded-xl border border-orange-200 bg-orange-50 dark:bg-[#3a2a1a] dark:border-[#5a3a1a] p-4 shadow-lg">
-              <p className="text-sm font-semibold text-field-black">
-                You have {overdueToastCount} overdue reminder{overdueToastCount === 1 ? '' : 's'}
-              </p>
-              <div className="mt-3 flex items-center justify-end gap-2">
-                <button className="btn-secondary !px-3 !py-2" onClick={() => setShowOverdueToast(false)}>
-                  Dismiss
-                </button>
-                <Link className="btn-primary !px-3 !py-2" to="/activities" onClick={() => setShowOverdueToast(false)}>
-                  View
-                </Link>
-              </div>
-            </div>
-          </div>
-        </ModalPortal>
-      )}
     </div>
   )
 }
