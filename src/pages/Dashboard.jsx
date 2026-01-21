@@ -353,7 +353,7 @@ export default function Dashboard() {
 
   const reminderRows = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
-    const todayPlus2 = format(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
+    const todayPlus1 = format(new Date(Date.now() + 1 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
 
     function isCompleted(a) {
       return !!(a?.completed ?? a?.done ?? false)
@@ -367,6 +367,8 @@ export default function Dashboard() {
 
         const reminderDate = String(a?.reminder_date ?? a?.reminderDate ?? '').slice(0, 10)
         if (!reminderDate) return null
+        // only show overdue / today / within next 1 day
+        if (reminderDate > todayPlus1) return null
 
         const id = a?.id
         if (id == null) return null
@@ -377,8 +379,8 @@ export default function Dashboard() {
 
         const overdue = reminderDate < today
         const dueToday = reminderDate === today
-        const dueSoon = reminderDate > today && reminderDate <= todayPlus2
-        const dueLater = reminderDate > todayPlus2
+        const dueSoon = reminderDate > today && reminderDate <= todayPlus1
+        const dueLater = reminderDate > todayPlus1
 
         return {
           id,
@@ -637,17 +639,13 @@ export default function Dashboard() {
         {/* Right Column - 2 cols */}
         <div className="lg:col-span-2 space-y-6">
           {/* Upcoming Reminders */}
-          <div className="card-static p-5">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="font-semibold">Upcoming Reminders</h2>
-              <Link to="/activities" className="text-sm text-field-black font-medium hover:underline">View all →</Link>
-            </div>
-
-            {upcomingReminders.length === 0 ? (
-              <div className="text-sm text-field-stone py-4 text-center">
-                {loading ? 'Loading…' : 'No reminders'}
+          {upcomingReminders.length > 0 && (
+            <div className="card-static p-5">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="font-semibold">Upcoming Reminders</h2>
+                <Link to="/activities" className="text-sm text-field-black font-medium hover:underline">View all →</Link>
               </div>
-            ) : (
+
               <div className="space-y-3">
                 {upcomingReminders.slice(0, 8).map((r) => {
                   const dateLabel = r.reminderDate ? format(new Date(r.reminderDate), 'MMM d, yyyy') : '—'
@@ -683,15 +681,15 @@ export default function Dashboard() {
                               ? "bg-orange-200 text-orange-800"
                               : "bg-white border border-gray-200 text-field-stone"
                         )}>
-                          {urgent ? (r.overdue ? 'Overdue' : 'Today') : (r.dueSoon ? 'Next 2 days' : 'Later')}
+                          {urgent ? (r.overdue ? 'Overdue' : 'Today') : (r.dueSoon ? 'Tomorrow' : 'Later')}
                         </span>
                       </div>
                     </Link>
                   )
                 })}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Today's Tasks */}
           <div className="card-static p-5">

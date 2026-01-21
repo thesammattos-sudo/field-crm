@@ -393,8 +393,10 @@ export default function Activities() {
     setDeleting(false)
   }
 
-  async function toggleCompleted(activity) {
-    const nextCompleted = !activity.completed
+  async function toggleCompleted(activity, nextCompletedOverride) {
+    const nextCompleted = typeof nextCompletedOverride === 'boolean'
+      ? nextCompletedOverride
+      : !activity.completed
     setActivities(prev => prev.map(a => a.id === activity.id ? { ...a, completed: nextCompleted } : a))
 
     let result = await supabase.from('activities').update({ completed: nextCompleted }).eq('id', activity.id).select('*').single()
@@ -548,7 +550,7 @@ export default function Activities() {
                               onClick={(e) => e.stopPropagation()}
                               onChange={(e) => {
                                 e.stopPropagation()
-                                toggleCompleted(activity)
+                                toggleCompleted(activity, e.target.checked)
                               }}
                               aria-label="Mark complete"
                             />
