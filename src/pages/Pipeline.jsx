@@ -6,7 +6,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 const stageIdSet = new Set(pipelineStages.map(s => s.id))
 const stageLabelToId = Object.fromEntries(
@@ -36,6 +36,8 @@ function normalizeStageId(raw) {
     booked: 'won',
     won: 'won',
     closed_won: 'won',
+    closed_lost: 'lost',
+    closed: 'closed',
     closedwon: 'won',
     pdf: 'pdf_sent',
   }
@@ -67,6 +69,7 @@ const emptyLeadForm = {
 
 export default function Pipeline() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -83,6 +86,35 @@ export default function Pipeline() {
   const stageLabelById = useMemo(() => {
     return Object.fromEntries(pipelineStages.map(s => [s.id, s.label]))
   }, [])
+
+  const queryFilters = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    const stageRaw = String(params.get('stage') || '').trim()
+    const sourceRaw = String(params.get('source') || '').trim()
+    const stage = stageRaw ? normalizeStageId(stageRaw) : ''
+    const source = sourceRaw
+    return { stage, source }
+  }, [location.search])
+
+  const filteredLeads = useMemo(() => {
+    let out = leads
+    if (queryFilters.source) {
+      const srcKey = queryFilters.source.toLowerCase()
+      out = out.filter(l => String(l.source || '').toLowerCase() === srcKey)
+    }
+    if (queryFilters.stage) {
+      if (queryFilters.stage === 'closed') {
+        out = out.filter(l => ['won', 'lost'].includes(l.stage))
+      } else {
+        out = out.filter(l => l.stage === queryFilters.stage)
+      }
+    }
+    return out
+  }, [leads, queryFilters.source, queryFilters.stage])
+
+  function clearFilters() {
+    navigate('/pipeline')
+  }
 
   const getPriorityColor = (p) => p === 'high' ? 'bg-field-gold' : p === 'medium' ? 'bg-field-stone-light' : 'bg-gray-300'
 
@@ -511,6 +543,24 @@ export default function Pipeline() {
         <button className="btn-primary" onClick={openAddModal}>+ Add Lead</button>
       </div>
 
+      {(queryFilters.stage || queryFilters.source) && (
+        <div className="mb-4 p-3 rounded-xl bg-field-sand border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-field-black">
+              Filtered Pipeline
+            </p>
+            <p className="text-xs text-field-stone mt-0.5">
+              {queryFilters.stage ? `Stage: ${queryFilters.stage === 'closed' ? 'Closed' : (stageLabelById[queryFilters.stage] || queryFilters.stage)}` : ''}
+              {queryFilters.stage && queryFilters.source ? ' · ' : ''}
+              {queryFilters.source ? `Source: ${queryFilters.source}` : ''}
+            </p>
+          </div>
+          <button type="button" className="btn-secondary !px-3 !py-2" onClick={clearFilters}>
+            Clear
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
           {error}
@@ -520,7 +570,7 @@ export default function Pipeline() {
       {/* Pipeline Board */}
       <div className="flex gap-4 overflow-x-auto pb-6">
         {pipelineStages.map((stage, i) => {
-          const stageLeads = leads.filter(l => l.stage === stage.id)
+          const stageLeads = filteredLeads.filter(l => l.stage === stage.id)
           return (
             <div 
               key={stage.id} 
