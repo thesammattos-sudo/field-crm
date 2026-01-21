@@ -33,15 +33,17 @@ function monthLabel(d) {
   return d.toLocaleString(undefined, { month: 'short' })
 }
 
+// Brand palette
+const BRAND_BLACK = '#1a1a1a'
+const BRAND_GOLD = '#C9A55C'
+const BRAND_GRAYS = ['#525252', '#78716c', '#a8a29e', '#d4d4d4']
+
 const SOURCE_COLORS = [
-  '#111827', // black-ish
-  '#b8860b', // gold
-  '#6b7280', // gray
-  '#d4a574', // sand/gold
-  '#16a34a', // green
-  '#f59e0b', // amber
-  '#3b82f6', // blue
-  '#ef4444', // red
+  BRAND_BLACK,
+  BRAND_GOLD,
+  ...BRAND_GRAYS,
+  '#16a34a', // keep green accent for variety
+  '#f59e0b', // amber accent
 ]
 
 export default function Analytics() {
@@ -87,7 +89,6 @@ export default function Analytics() {
       return acc
     }, {})
 
-    const stageById = Object.fromEntries(pipelineStages.map(s => [s.id, s]))
     const closedCount = (counts.won || 0) + (counts.lost || 0) + (counts.closing || 0)
 
     const items = [
@@ -102,9 +103,14 @@ export default function Analytics() {
 
     return items.map((it) => {
       const value = it.id === 'closed' ? closedCount : (counts[it.id] || 0)
-      const color = it.id === 'closed'
-        ? '#111827'
-        : (stageById[it.id]?.color || '#6b7280')
+      const color =
+        it.id === 'closed' ? BRAND_BLACK
+          : it.id === 'site_visit' || it.id === 'negotiating' ? BRAND_GOLD
+            : it.id === 'new' ? BRAND_BLACK
+              : it.id === 'contacted' ? BRAND_GRAYS[0]
+                : it.id === 'qualified' ? BRAND_GRAYS[1]
+                  : it.id === 'pdf_sent' ? BRAND_GRAYS[2]
+                    : BRAND_GRAYS[1]
       return { stage: it.label, value, color }
     })
   }, [normalizedLeads])
@@ -221,7 +227,7 @@ export default function Analytics() {
               <XAxis dataKey="month" />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Line type="monotone" dataKey="leads" stroke="#b8860b" strokeWidth={3} dot={{ r: 4 }} />
+              <Line type="monotone" dataKey="leads" stroke={BRAND_GOLD} strokeWidth={3} dot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         </div>
