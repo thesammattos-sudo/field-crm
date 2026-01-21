@@ -4,7 +4,6 @@ import { format } from 'date-fns'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import ModalPortal from '../components/ModalPortal'
-import { leads as initialLeads, projects as initialProjects } from '../data'
 import ConfirmDialog from '../components/ConfirmDialog'
 
 const getActivityIcon = (type) => {
@@ -28,13 +27,14 @@ const getPriorityColor = (p) => p === 'high' ? 'border-field-gold' : p === 'medi
 const emptyActivityForm = {
   title: '',
   type: 'call',
-  leadId: '',
-  projectId: '',
+  leadName: '',
+  projectName: '',
   contact: '',
   location: '',
   due_date: '',
   priority: 'medium',
   reminderEnabled: false,
+  reminderDate: '',
   reminderTime: '',
   notes: '',
 }
@@ -51,13 +51,15 @@ function normalizeActivity(row) {
     type: row.type ?? 'follow_up',
     contact: row.contact ?? row.contact_name ?? row.contactName ?? '',
     location: row.location ?? null,
-    leadId: row.lead_id ?? row.leadId ?? null,
-    projectId: row.project_id ?? row.projectId ?? null,
+    // New text-based linking
+    leadName: row.lead_name ?? row.leadName ?? row.lead ?? null,
+    projectName: row.project_name ?? row.projectName ?? row.project ?? null,
     due_date: row.due_date ?? row.dueDate ?? row.time ?? null,
     priority: row.priority ?? 'medium',
     completed: row.completed ?? row.done ?? false,
     notes: row.notes ?? row.description ?? '',
     reminderEnabled: row.reminder_enabled ?? row.reminderEnabled ?? false,
+    reminderDate: row.reminder_date ?? row.reminderDate ?? null,
     reminderTime: row.reminder_time ?? row.reminderTime ?? '',
     attachmentUrl: row.attachment_url ?? row.attachmentUrl ?? null,
     attachmentPath: row.attachment_path ?? row.attachmentPath ?? null,
@@ -82,8 +84,9 @@ export default function Activities() {
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
 
-  const [leadOptions, setLeadOptions] = useState(() => (initialLeads || []).map(l => ({ id: l.id, name: l.name })))
-  const [projectOptions, setProjectOptions] = useState(() => (initialProjects || []).map(p => ({ id: p.id, name: p.name })))
+  // Options for dropdowns (we save names as text).
+  const [leadOptions, setLeadOptions] = useState([])
+  const [projectOptions, setProjectOptions] = useState([])
 
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -120,15 +123,15 @@ export default function Activities() {
   }, [])
 
   useEffect(() => {
-    // Fetch leads/projects for dropdowns. If tables don't exist, silently keep local fallback.
+    // Fetch leads/projects for dropdowns. If tables don't exist, keep dropdowns empty.
     ;(async () => {
       const leadsRes = await supabase.from('leads').select('id,name')
       if (!leadsRes.error && Array.isArray(leadsRes.data) && leadsRes.data.length) {
-        setLeadOptions(leadsRes.data.map(l => ({ id: l.id, name: l.name })))
+        setLeadOptions(leadsRes.data.map(l => ({ id: String(l.id), name: l.name })))
       }
       const projectsRes = await supabase.from('projects').select('id,name')
       if (!projectsRes.error && Array.isArray(projectsRes.data) && projectsRes.data.length) {
-        setProjectOptions(projectsRes.data.map(p => ({ id: p.id, name: p.name })))
+        setProjectOptions(projectsRes.data.map(p => ({ id: String(p.id), name: p.name })))
       }
     })()
   }, [])
@@ -152,16 +155,18 @@ export default function Activities() {
   function openEditModal(activity) {
     setEditing(activity)
     const due = activity.due_date ? format(new Date(activity.due_date), 'yyyy-MM-dd') : ''
+    const reminderDate = activity.reminderDate ? String(activity.reminderDate).slice(0, 10) : ''
     setForm({
       title: activity.title ?? '',
       type: activity.type ?? 'call',
-      leadId: activity.leadId ? String(activity.leadId) : '',
-      projectId: activity.projectId ? String(activity.projectId) : '',
+      leadName: activity.leadName ?? '',
+      projectName: activity.projectName ?? '',
       contact: activity.contact ?? '',
       location: activity.location ?? '',
       due_date: due,
       priority: activity.priority ?? 'medium',
       reminderEnabled: !!activity.reminderEnabled,
+      reminderDate,
       reminderTime: activity.reminderTime ?? '',
       notes: activity.notes ?? '',
     })
@@ -211,23 +216,30 @@ export default function Activities() {
       }
     }
 
-    const leadId = form.leadId ? Number(form.leadId) : null
-    const projectId = form.projectId ? Number(form.projectId) : null
+    const leadName = String(form.leadName || '').trim()
+    const projectName = String(form.projectName || '').trim()
 
     const payloadSnakeFull = {
       title: form.title.trim(),
       type: form.type,
-      lead_id: leadId,
-      project_id: projectId,
       contact: form.contact.trim(),
       location: form.location.trim() || null,
       due_date: form.due_date || null,
       priority: form.priority,
       reminder_enabled: !!form.reminderEnabled,
+      reminder_date: form.reminderEnabled ? (form.reminderDate || null) : null,
       reminder_time: form.reminderEnabled ? (form.reminderTime || null) : null,
       notes: form.notes.trim() || null,
       ...(attachmentMeta || {}),
     }
+
+    // Use text-based linking (omit fields entirely if not selected)
+    if (leadName) payloadSnakeFull.lead_name = leadName
+    if (projectName) payloadSnakeFull.project_name = projectName
+
+    // Debug: show values being sent to Supabase
+    // eslint-disable-next-line no-console
+    console.log('[Activities] upsert payload (snake)', payloadSnakeFull)
 
     const payloadSnakeMinimal = {
       title: form.title.trim(),
@@ -245,6 +257,9 @@ export default function Activities() {
       time: form.due_date || null,
       priority: form.priority,
     }
+
+    // eslint-disable-next-line no-console
+    console.log('[Activities] upsert payload (legacy)', payloadAlt)
 
     let result
     if (editing?.id) {
@@ -367,12 +382,8 @@ export default function Activities() {
                 ? (isToday(activity.due_date) ? 'Today' : format(new Date(activity.due_date), 'MMM d, yyyy'))
                 : 'No due date'
 
-              const leadName = activity.leadId
-                ? (leadOptions.find(l => String(l.id) === String(activity.leadId))?.name || null)
-                : null
-              const projectName = activity.projectId
-                ? (projectOptions.find(p => String(p.id) === String(activity.projectId))?.name || null)
-                : null
+              const leadName = activity.leadName || null
+              const projectName = activity.projectName || null
 
               return (
                 <div
@@ -531,12 +542,12 @@ export default function Activities() {
                     <label className="text-xs text-field-stone-light">Link to Lead</label>
                     <select
                       className="input mt-1"
-                      value={form.leadId}
-                      onChange={(e) => setForm(f => ({ ...f, leadId: e.target.value }))}
+                      value={form.leadName}
+                      onChange={(e) => setForm(f => ({ ...f, leadName: e.target.value }))}
                     >
                       <option value="">—</option>
                       {leadOptions.map(l => (
-                        <option key={l.id} value={String(l.id)}>{l.name}</option>
+                        <option key={l.id} value={l.name}>{l.name}</option>
                       ))}
                     </select>
                   </div>
@@ -546,12 +557,12 @@ export default function Activities() {
                     <label className="text-xs text-field-stone-light">Link to Project</label>
                     <select
                       className="input mt-1"
-                      value={form.projectId}
-                      onChange={(e) => setForm(f => ({ ...f, projectId: e.target.value }))}
+                      value={form.projectName}
+                      onChange={(e) => setForm(f => ({ ...f, projectName: e.target.value }))}
                     >
                       <option value="">—</option>
                       {projectOptions.map(p => (
-                        <option key={p.id} value={String(p.id)}>{p.name}</option>
+                        <option key={p.id} value={p.name}>{p.name}</option>
                       ))}
                     </select>
                   </div>
@@ -606,23 +617,39 @@ export default function Activities() {
                   {/* Reminder */}
                   <div className="sm:col-span-2">
                     <label className="text-xs text-field-stone-light">Reminder</label>
-                    <div className="mt-2 flex items-center gap-3">
+                    <div className="mt-2 flex items-center gap-2">
                       <label className="flex items-center gap-2 text-sm text-field-stone">
                         <input
                           type="checkbox"
                           checked={!!form.reminderEnabled}
                           onChange={(e) => setForm(f => ({ ...f, reminderEnabled: e.target.checked }))}
                         />
-                        Enable reminder
+                        Reminder on/off
                       </label>
-                      <input
-                        type="time"
-                        className={clsx("input h-10", !form.reminderEnabled && "opacity-50 pointer-events-none")}
-                        value={form.reminderTime}
-                        onChange={(e) => setForm(f => ({ ...f, reminderTime: e.target.value }))}
-                        disabled={!form.reminderEnabled}
-                      />
                     </div>
+
+                    {form.reminderEnabled && (
+                      <div className="mt-3 grid sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-field-stone-light">Reminder Date</label>
+                          <input
+                            type="date"
+                            className="input mt-1"
+                            value={form.reminderDate || ''}
+                            onChange={(e) => setForm(f => ({ ...f, reminderDate: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-field-stone-light">Reminder Time</label>
+                          <input
+                            type="time"
+                            className="input mt-1"
+                            value={form.reminderTime || ''}
+                            onChange={(e) => setForm(f => ({ ...f, reminderTime: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                    )}
                     <p className="text-[11px] text-field-stone mt-1">
                       (This stores reminder settings; notifications require backend scheduling.)
                     </p>

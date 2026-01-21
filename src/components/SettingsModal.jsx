@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import ModalPortal from './ModalPortal'
 import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import ConfirmDialog from './ConfirmDialog'
 
 function looksLikeMissingRelationError(message, table) {
   if (!message) return false
@@ -37,6 +38,13 @@ export default function SettingsModal({ open, onClose }) {
   const [newUserMsg, setNewUserMsg] = useState('')
   const [newUserErr, setNewUserErr] = useState('')
 
+  // Manage existing users (owner-only)
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [usersErr, setUsersErr] = useState('')
+  const [users, setUsers] = useState([])
+  const [deletingUser, setDeletingUser] = useState(false)
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState(null) // user row
+
   const isolatedAuthClient = useMemo(() => {
     // Separate client so creating users does NOT overwrite the current session.
     return createClient(supabaseUrl, supabaseAnonKey, {
@@ -49,6 +57,37 @@ export default function SettingsModal({ open, onClose }) {
     })
   }, [])
 
+  async function fetchUsersList() {
+    if (!isOwner) return
+    setUsersLoading(true)
+    setUsersErr('')
+
+    const res = await supabase
+      .from('profiles')
+      .select('id,email,name,role,created_at')
+      .order('created_at', { ascending: true })
+
+    if (res.error) {
+      const msg = res.error.message || ''
+      if (looksLikeMissingRelationError(msg, 'profiles')) {
+        setUsers([{
+          id: user?.id || 'me',
+          email: user?.email || '',
+          name: profile?.name || user?.user_metadata?.name || '',
+          role: role || 'owner',
+        }])
+      } else {
+        setUsersErr(res.error.message || 'Failed to load users.')
+        setUsers([])
+      }
+      setUsersLoading(false)
+      return
+    }
+
+    setUsers(Array.isArray(res.data) ? res.data : [])
+    setUsersLoading(false)
+  }
+
   useEffect(() => {
     if (!open) return
     // reset ephemeral messages when opening
@@ -58,6 +97,7 @@ export default function SettingsModal({ open, onClose }) {
     setPwErr('')
     setNewUserMsg('')
     setNewUserErr('')
+    setUsersErr('')
 
     const pName = profile?.name || profile?.full_name || user?.user_metadata?.name || user?.user_metadata?.full_name || ''
     setFullName(pName)
@@ -70,6 +110,12 @@ export default function SettingsModal({ open, onClose }) {
     const theme = typeof window !== 'undefined' ? window.localStorage.getItem('fieldcrm_theme') : null
     setDarkMode(theme === 'dark')
   }, [open, user, profile])
+
+  useEffect(() => {
+    if (!open) return
+    if (!isOwner) return
+    fetchUsersList()
+  }, [open, isOwner, user?.id, user?.email, profile?.name, role])
 
   useEffect(() => {
     if (!open) return
@@ -201,6 +247,9 @@ export default function SettingsModal({ open, onClose }) {
     setNewUserPassword('')
     setNewUserRole('sales_rep')
     setNewUserSaving(false)
+
+    // refresh list after creating user (best-effort)
+    await fetchUsersList()
   }
 
   function toggleDarkMode(next) {
@@ -211,6 +260,42 @@ export default function SettingsModal({ open, onClose }) {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.toggle('dark', !!next)
     }
+  }
+
+  async function updateUserRole(userId, nextRole) {
+    // optimistic UI
+    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, role: nextRole } : u)))
+    const res = await supabase
+      .from('profiles')
+      .update({ role: nextRole, updated_at: new Date().toISOString() })
+      .eq('id', userId)
+
+    if (res.error) {
+      setUsersErr(res.error.message || 'Failed to update role.')
+    }
+  }
+
+  async function deleteUser(userRow) {
+    if (!userRow?.id) return
+    if (userRow.id === user?.id) {
+      setUsersErr('You cannot delete your own user.')
+      return
+    }
+
+    setDeletingUser(true)
+    setUsersErr('')
+
+    // NOTE: Client apps cannot delete auth users without Admin API/service role.
+    // We delete the profile row (so the user disappears from the CRM users list).
+    const res = await supabase.from('profiles').delete().eq('id', userRow.id)
+    if (res.error) {
+      setUsersErr(res.error.message || 'Failed to delete user.')
+      setDeletingUser(false)
+      return
+    }
+
+    setUsers(prev => prev.filter(u => u.id !== userRow.id))
+    setDeletingUser(false)
   }
 
   return (
@@ -230,7 +315,7 @@ export default function SettingsModal({ open, onClose }) {
           padding: '16px',
         }}
         onClick={() => {
-          if (profileSaving || pwSaving || newUserSaving) return
+          if (profileSaving || pwSaving || newUserSaving || deletingUser) return
           onClose?.()
         }}
       >
@@ -340,66 +425,149 @@ export default function SettingsModal({ open, onClose }) {
             </form>
           </div>
 
-          {/* 3) Add New User (owner only) */}
+          {/* Owner-only sections */}
           {isOwner && (
-            <div className="border-t border-gray-100 pt-6 mb-2">
-              <h3 className="font-semibold text-field-black">Add New User</h3>
-              <p className="text-sm text-field-stone mt-1">Create a new user and assign a role.</p>
+            <>
+              {/* Invite new users */}
+              <div className="border-t border-gray-100 pt-6 mb-6">
+                <h3 className="font-semibold text-field-black">Invite New Users</h3>
+                <p className="text-sm text-field-stone mt-1">Create a new user and assign a role.</p>
 
-              {newUserErr && (
-                <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
-                  {newUserErr}
-                </div>
-              )}
-              {newUserMsg && (
-                <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
-                  {newUserMsg}
-                </div>
-              )}
+                {newUserErr && (
+                  <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+                    {newUserErr}
+                  </div>
+                )}
+                {newUserMsg && (
+                  <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
+                    {newUserMsg}
+                  </div>
+                )}
 
-              <form onSubmit={createNewUser} className="mt-3 grid sm:grid-cols-3 gap-3 items-end">
-                <div className="sm:col-span-2">
-                  <label className="text-xs text-field-stone-light">Email</label>
-                  <input
-                    type="email"
-                    className="input mt-1"
-                    value={newUserEmail}
-                    onChange={(e) => setNewUserEmail(e.target.value)}
-                    placeholder="new.user@company.com"
-                  />
+                <form onSubmit={createNewUser} className="mt-3 grid sm:grid-cols-3 gap-3 items-end">
+                  <div className="sm:col-span-2">
+                    <label className="text-xs text-field-stone-light">Email</label>
+                    <input
+                      type="email"
+                      className="input mt-1"
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      placeholder="new.user@company.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-field-stone-light">Role</label>
+                    <select
+                      className="input mt-1"
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value)}
+                    >
+                      <option value="owner">Owner</option>
+                      <option value="sales_rep">Sales rep</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="text-xs text-field-stone-light">Temporary password</label>
+                    <input
+                      type="password"
+                      className="input mt-1"
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      placeholder="Min 8 characters"
+                      autoComplete="new-password"
+                    />
+                    <p className="text-[11px] text-field-stone mt-2">
+                      Depending on Supabase auth settings, the user may need to confirm their email before signing in.
+                    </p>
+                  </div>
+                  <div className="sm:col-span-3 flex justify-end pt-1">
+                    <button type="submit" className="btn-primary" disabled={newUserSaving}>
+                      {newUserSaving ? 'Creating…' : 'Create user'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Manage existing users */}
+              <div className="border-t border-gray-100 pt-6 mb-6">
+                <h3 className="font-semibold text-field-black">Manage Users</h3>
+                <p className="text-sm text-field-stone mt-1">View users, change roles, and delete users.</p>
+
+                {usersErr && (
+                  <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+                    {usersErr}
+                  </div>
+                )}
+
+                <div className="mt-4 card-static overflow-hidden">
+                  <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-gray-200 text-[11px] font-semibold text-field-stone-light uppercase tracking-wider">
+                    <div className="col-span-4">Name</div>
+                    <div className="col-span-5">Email</div>
+                    <div className="col-span-2">Role</div>
+                    <div className="col-span-1 text-right"> </div>
+                  </div>
+
+                  {usersLoading ? (
+                    <div className="px-4 py-4 text-sm text-field-stone">Loading…</div>
+                  ) : users.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-field-stone">No users found.</div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {users.map(u => (
+                        <div key={u.id} className="grid grid-cols-12 gap-3 px-4 py-3 items-center">
+                          <div className="col-span-4">
+                            <div className="text-sm font-medium text-field-black truncate">
+                              {u.name || '—'}
+                              {u.id === user?.id && <span className="ml-2 text-[11px] text-field-stone">(you)</span>}
+                            </div>
+                          </div>
+                          <div className="col-span-5">
+                            <div className="text-sm text-field-stone truncate">{u.email || '—'}</div>
+                          </div>
+                          <div className="col-span-2">
+                            <select
+                              className="input !py-2"
+                              value={u.role || 'sales_rep'}
+                              onChange={(e) => updateUserRole(u.id, e.target.value)}
+                              disabled={u.id === user?.id}
+                            >
+                              <option value="owner">Owner</option>
+                              <option value="sales_rep">Sales rep</option>
+                            </select>
+                          </div>
+                          <div className="col-span-1 flex justify-end">
+                            <button
+                              type="button"
+                              className="p-2 rounded-lg hover:bg-red-50"
+                              disabled={u.id === user?.id}
+                              onClick={() => setConfirmDeleteUser(u)}
+                              title={u.id === user?.id ? 'You cannot delete yourself' : 'Delete user'}
+                            >
+                              <span className="text-red-600 font-semibold">✕</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="text-xs text-field-stone-light">Role</label>
-                  <select
-                    className="input mt-1"
-                    value={newUserRole}
-                    onChange={(e) => setNewUserRole(e.target.value)}
-                  >
-                    <option value="owner">Owner</option>
-                    <option value="sales_rep">Sales rep</option>
-                  </select>
-                </div>
-                <div className="sm:col-span-3">
-                  <label className="text-xs text-field-stone-light">Temporary password</label>
-                  <input
-                    type="password"
-                    className="input mt-1"
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    placeholder="Min 8 characters"
-                    autoComplete="new-password"
-                  />
-                  <p className="text-[11px] text-field-stone mt-2">
-                    Depending on Supabase auth settings, the user may need to confirm their email before signing in.
+                <p className="text-[11px] text-field-stone mt-2">
+                  Note: deleting here removes the user’s profile record. Deleting Auth users requires a server-side Admin API.
+                </p>
+              </div>
+
+              {/* App settings (owner only) */}
+              <div className="border-t border-gray-100 pt-6">
+                <h3 className="font-semibold text-field-black">App Settings</h3>
+                <p className="text-sm text-field-stone mt-1">Owner-only app preferences.</p>
+
+                <div className="mt-3 card-static p-4">
+                  <p className="text-sm text-field-stone">
+                    More admin settings can be added here (notifications, defaults, integrations).
                   </p>
                 </div>
-                <div className="sm:col-span-3 flex justify-end pt-1">
-                  <button type="submit" className="btn-primary" disabled={newUserSaving}>
-                    {newUserSaving ? 'Creating…' : 'Create user'}
-                  </button>
-                </div>
-              </form>
-            </div>
+              </div>
+            </>
           )}
 
           {/* Dark mode */}
@@ -433,13 +601,28 @@ export default function SettingsModal({ open, onClose }) {
               type="button"
               className="btn-secondary"
               onClick={() => onClose?.()}
-              disabled={profileSaving || pwSaving || newUserSaving}
+              disabled={profileSaving || pwSaving || newUserSaving || deletingUser}
             >
               Close
             </button>
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteUser}
+        title="Delete user?"
+        message={confirmDeleteUser?.email ? `Delete user "${confirmDeleteUser.email}"? This will remove their CRM profile.` : 'Delete this user?'}
+        confirmText="Delete"
+        cancelText="Cancel"
+        loading={deletingUser}
+        onCancel={() => setConfirmDeleteUser(null)}
+        onConfirm={async () => {
+          const target = confirmDeleteUser
+          setConfirmDeleteUser(null)
+          if (target) await deleteUser(target)
+        }}
+      />
     </ModalPortal>
   )
 }
