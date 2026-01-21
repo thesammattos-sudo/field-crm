@@ -352,23 +352,44 @@ export default function Dashboard() {
   }, [normalizedLeads])
 
   const reminderRows = useMemo(() => {
-    const today = format(new Date(), 'yyyy-MM-dd')
-    const todayPlus1 = format(new Date(Date.now() + 1 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+    const dayAfter = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2)
 
     function isCompleted(a) {
       return !!(a?.completed ?? a?.done ?? false)
     }
 
+    function normalizeBool(v) {
+      if (typeof v === 'boolean') return v
+      if (typeof v === 'number') return v === 1
+      const s = String(v ?? '').trim().toLowerCase()
+      if (!s) return false
+      return s === 'true' || s === 't' || s === '1' || s === 'yes' || s === 'y'
+    }
+
+    function parseLocalDateOnly(value) {
+      const datePart = String(value || '').slice(0, 10) // yyyy-mm-dd
+      const [Y, M, D] = datePart.split('-').map(n => Number(n))
+      if (!Y || !M || !D) return null
+      const dt = new Date(Y, M - 1, D)
+      return Number.isNaN(dt.getTime()) ? null : dt
+    }
+
     return (activities || [])
       .map(a => {
-        const enabled = a?.reminder_enabled ?? a?.reminderEnabled ?? false
+        const enabledRaw = (a?.reminder_enabled ?? a?.reminderEnabled ?? false)
+        const enabled = normalizeBool(enabledRaw)
         if (!enabled) return null
         if (isCompleted(a)) return null
 
-        const reminderDate = String(a?.reminder_date ?? a?.reminderDate ?? '').slice(0, 10)
-        if (!reminderDate) return null
-        // only show overdue / today / within next 1 day
-        if (reminderDate > todayPlus1) return null
+        const reminderDateValue = a?.reminder_date ?? a?.reminderDate ?? null
+        const reminderAt = parseLocalDateOnly(reminderDateValue)
+        if (!reminderAt) return null
+
+        // Only show if overdue / today / tomorrow (i.e. reminderAt < dayAfter)
+        if (reminderAt.getTime() >= dayAfter.getTime()) return null
 
         const id = a?.id
         if (id == null) return null
@@ -377,16 +398,16 @@ export default function Dashboard() {
         const title = a?.title || a?.subject || 'Activity'
         const leadName = a?.lead_name ?? a?.leadName ?? a?.lead ?? ''
 
-        const overdue = reminderDate < today
-        const dueToday = reminderDate === today
-        const dueSoon = reminderDate > today && reminderDate <= todayPlus1
-        const dueLater = reminderDate > todayPlus1
+        const overdue = reminderAt.getTime() < today.getTime()
+        const dueToday = reminderAt.getTime() === today.getTime()
+        const dueSoon = reminderAt.getTime() === tomorrow.getTime()
+        const dueLater = reminderAt.getTime() >= dayAfter.getTime()
 
         return {
           id,
           title,
           leadName: leadName ? String(leadName) : '',
-          reminderDate,
+          reminderDate: format(reminderAt, 'yyyy-MM-dd'),
           reminderTime,
           overdue,
           dueToday,
