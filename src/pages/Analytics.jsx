@@ -19,7 +19,7 @@ function normalizeStageId(raw) {
   if (stageLabelToId[rawLower]) return stageLabelToId[rawLower]
   const token = rawLower.replace(/[-\s]+/g, '_')
   if (stageIdSet.has(token)) return token
-  const special = { booked: 'won', won: 'won', closed_won: 'won', closedwon: 'won', pdf: 'pdf_sent' }
+  const special = { booked: 'won', won: 'won', closed_won: 'won', closed_lost: 'lost', closedwon: 'won', pdf: 'pdf_sent' }
   if (special[token]) return special[token]
   return 'new'
 }
@@ -166,42 +166,25 @@ export default function Analytics() {
     return activitiesNormalized.filter(a => inRange(a.dueDate))
   }, [activitiesNormalized, dateRange.start, dateRange.end])
 
-  // Conversion KPIs
-  const kpis = useMemo(() => {
+  // TOP STATS ROW (requested)
+  const topStats = useMemo(() => {
     const total = leadsFiltered.length
-    const won = leadsFiltered.filter(l => l.stage === 'won').length
-    const lost = leadsFiltered.filter(l => l.stage === 'lost').length
-    const closed = won + lost
+    const closedWon = leadsFiltered.filter(l => l.stage === 'won').length
+    const conversionRate = total > 0 ? (closedWon / total) * 100 : 0
 
-    const pipelineValue = leadsFiltered.reduce((sum, l) => sum + parseBudget(l.budget), 0)
-    const avgDeal = total > 0 ? pipelineValue / total : 0
+    const totalPipelineValue = leadsFiltered.reduce((sum, l) => sum + parseBudget(l.budget), 0)
+    const avgDealSize = total > 0 ? (totalPipelineValue / total) : 0
 
-    const closeDurations = leadsFiltered
-      .filter(l => (l.stage === 'won' || l.stage === 'lost') && l.createdAt && l.closeAt)
-      .map(l => {
-        const a = new Date(l.createdAt)
-        const b = new Date(l.closeAt)
-        if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null
-        const days = Math.max(0, Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)))
-        return days
-      })
-      .filter(v => typeof v === 'number')
-    const avgCloseDays = closeDurations.length ? Math.round(closeDurations.reduce((s, d) => s + d, 0) / closeDurations.length) : null
+    const now = new Date()
+    const thisMonthLeads = normalizedLeads.filter(l => {
+      if (!l.createdAt) return false
+      const d = new Date(l.createdAt)
+      if (Number.isNaN(d.getTime())) return false
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+    }).length
 
-    const conversionRate = total > 0 ? (won / total) * 100 : 0
-    const winRateClosed = closed > 0 ? (won / closed) * 100 : 0
-    const lostRateClosed = closed > 0 ? (lost / closed) * 100 : 0
-
-    return {
-      total, won, lost, closed,
-      pipelineValue,
-      avgDeal,
-      avgCloseDays,
-      conversionRate,
-      winRateClosed,
-      lostRateClosed,
-    }
-  }, [leadsFiltered])
+    return { total, closedWon, conversionRate, totalPipelineValue, avgDealSize, thisMonthLeads }
+  }, [leadsFiltered, normalizedLeads])
 
   const funnelData = useMemo(() => {
     const counts = leadsFiltered.reduce((acc, l) => {
@@ -306,9 +289,9 @@ export default function Analytics() {
     const known = ['OMMA Villas', 'Tropicalia Breeze', 'Tropicalia Villas']
     const map = new Map(known.map(p => [p, 0]))
     for (const l of leadsFiltered) {
-      const proj = l.project || 'Other'
-      const key = known.includes(proj) ? proj : 'Other'
-      map.set(key, (map.get(key) || 0) + parseBudget(l.budget))
+      const proj = l.project || ''
+      if (!known.includes(proj)) continue
+      map.set(proj, (map.get(proj) || 0) + parseBudget(l.budget))
     }
     const rows = Array.from(map.entries()).map(([project, value]) => ({ project, value }))
     rows.sort((a, b) => b.value - a.value)
@@ -331,14 +314,9 @@ export default function Analytics() {
   const insights = useMemo(() => {
     const tips = []
 
-    // Best source share
     const topSource = sourceData[0]
-    if (topSource) {
-      const pct = leadsFiltered.length ? Math.round((topSource.value / leadsFiltered.length) * 100) : 0
-      tips.push(`🔥 ${topSource.name} is your top lead source (${pct}% of leads)`)
-    }
+    if (topSource) tips.push(`🔥 ${topSource.name} is your top lead source`)
 
-    // Leads needing follow-up (all leads, regardless of range)
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 7)
     const followups = normalizedLeads.filter(l => {
@@ -347,52 +325,26 @@ export default function Analytics() {
       if (Number.isNaN(d.getTime())) return true
       return d.getTime() <= cutoff.getTime()
     }).length
-    if (followups > 0) tips.push(`⚠️ ${followups} leads haven't been contacted in 7+ days`)
+    tips.push(`⚠️ ${followups} leads need follow-up`)
 
-    // Lead volume change (current range vs previous same-length)
-    const withCreated = normalizedLeads.filter(l => l.createdAt && !Number.isNaN(new Date(l.createdAt).getTime()))
-    const end = dateRange.end
-    const start = dateRange.start
-    let cur = 0
-    let prev = 0
-    if (start) {
-      const lenMs = end.getTime() - start.getTime()
-      const prevStart = new Date(start.getTime() - lenMs)
-      const prevEnd = new Date(end.getTime() - lenMs)
-      cur = withCreated.filter(l => {
-        const d = new Date(l.createdAt)
-        return d.getTime() >= start.getTime() && d.getTime() <= end.getTime()
-      }).length
-      prev = withCreated.filter(l => {
-        const d = new Date(l.createdAt)
-        return d.getTime() >= prevStart.getTime() && d.getTime() <= prevEnd.getTime()
-      }).length
-    } else {
-      // All time: last 30 days vs previous 30
-      const curStart = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000)
-      const prevStart = new Date(curStart.getTime() - 30 * 24 * 60 * 60 * 1000)
-      const prevEnd = new Date(curStart.getTime())
-      cur = withCreated.filter(l => {
-        const d = new Date(l.createdAt)
-        return d.getTime() >= curStart.getTime() && d.getTime() <= end.getTime()
-      }).length
-      prev = withCreated.filter(l => {
-        const d = new Date(l.createdAt)
-        return d.getTime() >= prevStart.getTime() && d.getTime() <= prevEnd.getTime()
-      }).length
-    }
-    if (prev > 0) {
-      const delta = Math.round(((cur - prev) / prev) * 100)
-      if (delta !== 0) tips.push(`📈 Lead volume ${delta > 0 ? 'up' : 'down'} ${Math.abs(delta)}% vs previous period`)
-    }
+    const now = new Date()
+    const thisMonth = normalizedLeads.filter(l => {
+      if (!l.createdAt) return false
+      const d = new Date(l.createdAt)
+      if (Number.isNaN(d.getTime())) return false
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+    }).length
+    const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const prevMonth = normalizedLeads.filter(l => {
+      if (!l.createdAt) return false
+      const d = new Date(l.createdAt)
+      if (Number.isNaN(d.getTime())) return false
+      return d.getFullYear() === prevMonthDate.getFullYear() && d.getMonth() === prevMonthDate.getMonth()
+    }).length
+    if (thisMonth > prevMonth) tips.push('📈 Lead volume trending up')
 
-    // Best conversion source
-    if (sourceConversion.best) {
-      tips.push(`🏆 Best converting source: ${sourceConversion.best.source} (${Math.round(sourceConversion.best.winRate)}% win rate)`)
-    }
-
-    return tips.slice(0, 6)
-  }, [sourceData, leadsFiltered.length, normalizedLeads, dateRange.start, dateRange.end, sourceConversion.best])
+    return tips
+  }, [sourceData, normalizedLeads])
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -429,37 +381,35 @@ export default function Analytics() {
         </div>
       )}
 
-      {/* Conversion metrics */}
+      {/* Stats row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="card-static p-5">
           <p className="text-xs font-medium text-field-stone uppercase tracking-wide">Conversion Rate</p>
           <p className="font-display text-3xl font-semibold text-field-black mt-2">
-            {kpis.total ? `${Math.round(kpis.conversionRate)}%` : '—'}
+            {topStats.total ? `${Math.round(topStats.conversionRate)}%` : '—'}
           </p>
-          <p className="text-xs text-field-stone mt-1">Closed won / total leads</p>
+          <p className="text-xs text-field-stone mt-1">Closed Won / Total Leads</p>
         </div>
         <div className="card-static p-5">
           <p className="text-xs font-medium text-field-stone uppercase tracking-wide">Average Deal Size</p>
           <p className="font-display text-3xl font-semibold text-field-black mt-2">
-            {kpis.total ? `$${Math.round(kpis.avgDeal).toLocaleString()}` : '—'}
+            {topStats.total ? `$${Math.round(topStats.avgDealSize).toLocaleString()}` : '—'}
           </p>
-          <p className="text-xs text-field-stone mt-1">Pipeline value / leads</p>
+          <p className="text-xs text-field-stone mt-1">Total budgets / lead count</p>
         </div>
         <div className="card-static p-5">
-          <p className="text-xs font-medium text-field-stone uppercase tracking-wide">Avg Time to Close</p>
+          <p className="text-xs font-medium text-field-stone uppercase tracking-wide">Total Pipeline Value</p>
           <p className="font-display text-3xl font-semibold text-field-black mt-2">
-            {kpis.avgCloseDays == null ? '—' : `${kpis.avgCloseDays}d`}
+            {topStats.total ? `$${Math.round(topStats.totalPipelineValue).toLocaleString()}` : '—'}
           </p>
-          <p className="text-xs text-field-stone mt-1">Created → close (closed only)</p>
+          <p className="text-xs text-field-stone mt-1">{dateRange.label}</p>
         </div>
         <div className="card-static p-5">
-          <p className="text-xs font-medium text-field-stone uppercase tracking-wide">Win vs Lost</p>
+          <p className="text-xs font-medium text-field-stone uppercase tracking-wide">Leads This Month</p>
           <p className="font-display text-3xl font-semibold text-field-black mt-2">
-            {kpis.closed ? `${Math.round(kpis.winRateClosed)}%` : '—'}
+            {topStats.thisMonthLeads.toLocaleString()}
           </p>
-          <p className="text-xs text-field-stone mt-1">
-            Won {kpis.won} · Lost {kpis.lost}
-          </p>
+          <p className="text-xs text-field-stone mt-1">Created in current month</p>
         </div>
       </div>
 
