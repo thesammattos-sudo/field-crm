@@ -31,7 +31,7 @@ export const projects = [
     features: ['Private Pool', 'Fully Furnished', 'FF&E Included', 'Villa Management', 'Tropical Garden', 'Motorbike Parking', 'Outdoor Shower'],
     roi: { min: 14, max: 21, guaranteed: 12 },
     paybackYears: { min: 4, max: 7 },
-    coverImage: '/images/omma-villas.png',
+    coverImage: '/images/oma-villas.png',
     galleryImages: [],
     milestones: [
       { name: 'Planning and Design', status: 'complete', date: 'Dec 2025' },
