@@ -13,6 +13,96 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  async function refreshProfile(targetUser = user) {
+    if (!targetUser) {
+      setProfile(null)
+      return { data: null, error: null }
+    }
+
+    const fetchRes = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', targetUser.id)
+      .maybeSingle()
+
+    if (fetchRes.error) {
+      const msg = fetchRes.error.message || ''
+      if (looksLikeMissingRelationError(msg, 'profiles')) {
+        const fallback = {
+          id: targetUser.id,
+          email: targetUser.email || null,
+          full_name: targetUser.user_metadata?.full_name || targetUser.user_metadata?.name || null,
+          role: 'owner',
+        }
+        setProfile(fallback)
+        return { data: fallback, error: null }
+      }
+      // swallow errors but keep last profile if any
+      return { data: null, error: fetchRes.error }
+    }
+
+    if (fetchRes.data) setProfile(fetchRes.data)
+    return { data: fetchRes.data || null, error: null }
+  }
+
+  async function updateProfile({ full_name, email }) {
+    if (!user) return { error: new Error('Not signed in') }
+
+    const trimmedName = typeof full_name === 'string' ? full_name.trim() : ''
+    const trimmedEmail = typeof email === 'string' ? email.trim() : ''
+
+    // 1) Update profiles table (if it exists)
+    let nextProfile = {
+      ...(profile || {}),
+      id: user.id,
+      full_name: trimmedName || null,
+      email: trimmedEmail || user.email || null,
+    }
+
+    const updateRes = await supabase
+      .from('profiles')
+      .update({
+        full_name: trimmedName || null,
+        email: trimmedEmail || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id)
+      .select('*')
+      .maybeSingle()
+
+    if (!updateRes.error && updateRes.data) {
+      nextProfile = updateRes.data
+    } else if (updateRes.error) {
+      const msg = updateRes.error.message || ''
+      if (!looksLikeMissingRelationError(msg, 'profiles')) {
+        // If RLS blocks or schema differs, we still allow local UI update.
+      }
+    }
+
+    // 2) Update auth user metadata and possibly email
+    // Note: Email changes can require verification, and may fail depending on Supabase settings.
+    let authErr = null
+    const updates = {}
+    if (trimmedName) updates.data = { full_name: trimmedName }
+    if (trimmedEmail && trimmedEmail !== user.email) updates.email = trimmedEmail
+
+    if (Object.keys(updates).length > 0) {
+      const res = await supabase.auth.updateUser(updates)
+      if (res.error) authErr = res.error
+      if (res.data?.user) setUser(res.data.user)
+    }
+
+    setProfile(nextProfile)
+    return { error: authErr }
+  }
+
+  async function updatePassword(newPassword) {
+    if (!user) return { error: new Error('Not signed in') }
+    const res = await supabase.auth.updateUser({ password: newPassword })
+    if (res.data?.user) setUser(res.data.user)
+    return { error: res.error || null }
+  }
+
   useEffect(() => {
     let mounted = true
 
@@ -120,6 +210,9 @@ export function AuthProvider({ children }) {
     profile,
     role: profile?.role || 'owner',
     loading,
+    refreshProfile,
+    updateProfile,
+    updatePassword,
     async signOut() {
       await supabase.auth.signOut()
     },

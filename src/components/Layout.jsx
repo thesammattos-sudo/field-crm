@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { Menu, Home, Users, Building2, Truck, Package, FileText, CheckSquare, Settings, Search, LogOut } from 'lucide-react'
+import { Menu, Home, Users, Building2, Truck, Package, FileText, CheckSquare, Settings, Search, LogOut, ArrowRight } from 'lucide-react'
 import { activities } from '../data'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import SettingsModal from './SettingsModal'
 
 const navItems = [
   { section: 'OVERVIEW', items: [
@@ -34,6 +35,7 @@ function looksLikeMissingColumnError(message) {
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const navigate = useNavigate()
   const { user, profile, role, signOut } = useAuth()
 
@@ -238,7 +240,7 @@ export default function Layout() {
   }, [results])
 
   return (
-    <div className="min-h-screen bg-field-cream">
+    <div className="min-h-screen bg-field-cream dark:bg-field-black">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div 
@@ -300,7 +302,12 @@ export default function Layout() {
                 <p className="font-semibold text-sm text-field-black truncate">{displayName}</p>
                 <p className="text-xs text-field-stone capitalize">{role?.replace('_', ' ')}</p>
               </div>
-              <button className="p-2 hover:bg-field-sand rounded-lg">
+              <button
+                type="button"
+                className="p-2 hover:bg-field-sand rounded-lg"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Open settings"
+              >
                 <Settings className="w-4 h-4 text-field-stone" />
               </button>
             </div>
@@ -417,6 +424,8 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

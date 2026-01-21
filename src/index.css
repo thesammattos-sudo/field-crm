@@ -9,7 +9,7 @@
   }
   
   body {
-    @apply font-sans text-field-black bg-field-cream;
+    @apply font-sans text-field-black bg-field-cream dark:bg-field-black dark:text-white;
   }
   
   /* Custom scrollbar */

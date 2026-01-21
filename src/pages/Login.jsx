@@ -36,7 +36,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-field-cream flex items-center justify-center p-4">
+    <div className="min-h-screen bg-field-cream dark:bg-field-black flex items-center justify-center p-4">
       <div className="w-full max-w-md card-static p-6 sm:p-8">
         <div className="flex flex-col items-center text-center mb-6">
           <img src="/field-logo.png" alt="Field Property" className="h-12 w-auto" />
