@@ -5,6 +5,7 @@ import { projects as initialProjects, leads as initialLeads, pipelineStages, com
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { format, formatDistanceToNow } from 'date-fns'
+import ModalPortal from '../components/ModalPortal'
 
 function looksLikeMissingRelationError(message, table) {
   if (!message) return false
@@ -409,6 +410,15 @@ export default function Dashboard() {
     return reminderRows
   }, [reminderRows])
 
+  const reminderToast = useMemo(() => {
+    if (attentionReminders.length === 0) return null
+    const anyOverdue = attentionReminders.some(r => r.overdue)
+    const anyToday = attentionReminders.some(r => r.dueToday)
+    const title = anyOverdue ? '⚠️ OVERDUE REMINDER' : (anyToday ? 'REMINDER DUE TODAY' : 'REMINDER')
+    const firstId = attentionReminders[0]?.id ?? null
+    return { title, count: attentionReminders.length, firstId }
+  }, [attentionReminders])
+
   const pipelineValueAll = useMemo(() => {
     return normalizedLeads.reduce((sum, l) => sum + parseBudgetForTotal(l.budget), 0)
   }, [normalizedLeads])
@@ -430,56 +440,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 lg:space-y-8 animate-fade-in">
-      {/* REMINDERS (top priority) */}
-      {attentionReminders.length > 0 && (
-        <div className="rounded-2xl border-2 border-red-300 bg-red-100 p-5 text-red-800">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h2 className="font-display text-xl font-extrabold tracking-wide text-red-800">
-                ⚠️ REMINDERS
-              </h2>
-              <p className="text-sm text-red-800/80 mt-1">
-                {attentionReminders.length} reminder{attentionReminders.length === 1 ? '' : 's'} need attention.
-              </p>
-            </div>
-            <Link to="/activities" className="text-sm font-semibold text-red-800 hover:underline">
-              View all →
-            </Link>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {attentionReminders.map((r) => {
-              const dateLabel = r.reminderDate ? format(new Date(r.reminderDate), 'MMM d, yyyy') : '—'
-              const timeLabel = r.reminderTime ? r.reminderTime : '—'
-              return (
-                <Link
-                  key={String(r.id)}
-                  to={`/activities?activity=${encodeURIComponent(String(r.id))}`}
-                  className={clsx(
-                    "block rounded-xl border p-4 transition-transform hover:-translate-y-0.5 hover:shadow-lg",
-                    "bg-red-100 border-red-300 animate-pulse"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="font-semibold truncate text-red-800">
-                        {r.title}
-                      </p>
-                      <p className="text-sm mt-1 truncate text-red-800/80">
-                        {r.leadName ? `Lead: ${r.leadName} · ` : ''}{dateLabel} · {timeLabel}
-                      </p>
-                    </div>
-                    <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-red-200 text-red-800">
-                      {r.overdue ? 'Overdue' : 'Due Today'}
-                    </span>
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
@@ -853,6 +813,41 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Top-right reminder toast (keep) */}
+      {reminderToast && (
+        <ModalPortal>
+          <div
+            style={{
+              position: 'fixed',
+              top: 16,
+              right: 16,
+              zIndex: 9999,
+              maxWidth: 520,
+              width: 'calc(100vw - 32px)',
+            }}
+          >
+            <div className="rounded-2xl border border-red-300 bg-red-100 p-4 shadow-xl">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-extrabold tracking-wide text-red-800 uppercase">
+                    {reminderToast.title}
+                  </p>
+                  <p className="mt-1 text-sm text-red-800/80">
+                    You have {reminderToast.count} urgent reminder{reminderToast.count === 1 ? '' : 's'} that need attention
+                  </p>
+                </div>
+                <Link
+                  to={reminderToast.firstId ? `/activities?activity=${encodeURIComponent(String(reminderToast.firstId))}` : '/activities'}
+                  className="inline-flex items-center justify-center h-9 px-3 rounded-lg bg-white border border-red-200 text-red-800 font-semibold text-sm hover:bg-red-50 transition-colors"
+                >
+                  View
+                </Link>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
     </div>
   )
