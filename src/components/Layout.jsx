@@ -43,6 +43,7 @@ export default function Layout() {
   const [attentionReminders, setAttentionReminders] = useState([])
   const [reminderGateOpen, setReminderGateOpen] = useState(false)
   const [reminderGateDismissed, setReminderGateDismissed] = useState(false)
+  const [reminderBannerDismissed, setReminderBannerDismissed] = useState(false)
   const defaultTitleRef = useRef('')
 
   const displayName = profile?.name || profile?.full_name || user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || 'User'
@@ -77,6 +78,15 @@ export default function Layout() {
     defaultTitleRef.current = document.title || 'Field Property CRM'
   }, [])
 
+  const reminderBuckets = useMemo(() => {
+    const urgent = attentionReminders.filter(r => r.overdue || r.dueToday)
+    const soon = attentionReminders.filter(r => r.dueSoon)
+    const later = attentionReminders.filter(r => r.dueLater)
+    const anyOverdue = urgent.some(r => r.overdue)
+    const anyDueToday = urgent.some(r => r.dueToday)
+    return { urgent, soon, later, anyOverdue, anyDueToday }
+  }, [attentionReminders])
+
   // Fetch "must-attend" reminders on app open (and refresh periodically).
   useEffect(() => {
     if (!user?.id) return
@@ -90,7 +100,17 @@ export default function Layout() {
       return `${yyyy}-${mm}-${dd}`
     }
 
-    function normalizeRow(a, today) {
+    function addDaysISO(isoDate, days) {
+      const [Y, M, D] = String(isoDate).split('-').map(n => Number(n))
+      if (!Y || !M || !D) return isoDate
+      const dt = new Date(Y, M - 1, D + days, 0, 0, 0, 0)
+      const yyyy = dt.getFullYear()
+      const mm = String(dt.getMonth() + 1).padStart(2, '0')
+      const dd = String(dt.getDate()).padStart(2, '0')
+      return `${yyyy}-${mm}-${dd}`
+    }
+
+    function normalizeRow(a, today, untilISO) {
       const enabled = a?.reminder_enabled ?? a?.reminderEnabled ?? false
       if (!enabled) return null
       const completed = !!(a?.completed ?? a?.done ?? false)
@@ -98,7 +118,7 @@ export default function Layout() {
 
       const reminderDate = String(a?.reminder_date ?? a?.reminderDate ?? '').slice(0, 10)
       if (!reminderDate) return null
-      if (reminderDate > today) return null
+      if (reminderDate > untilISO) return null
 
       const title = a?.title || a?.subject || 'Activity'
       const leadName = a?.lead_name ?? a?.leadName ?? a?.lead ?? ''
@@ -106,24 +126,32 @@ export default function Layout() {
       if (id == null) return null
       const reminderTime = String(a?.reminder_time ?? a?.reminderTime ?? '').trim()
 
+      const overdue = reminderDate < today
+      const dueToday = reminderDate === today
+      const dueSoon = reminderDate > today && reminderDate <= addDaysISO(today, 2)
+      const dueLater = reminderDate > addDaysISO(today, 2)
+
       return {
         id,
         title,
         leadName: leadName ? String(leadName) : '',
         reminderDate,
         reminderTime,
-        overdue: reminderDate < today,
-        dueToday: reminderDate === today,
+        overdue,
+        dueToday,
+        dueSoon,
+        dueLater,
       }
     }
 
     async function fetchReminders() {
       const today = todayLocalISO()
+      const until = addDaysISO(today, 2)
       let res = await supabase
         .from('activities')
         .select('*')
         .eq('reminder_enabled', true)
-        .lte('reminder_date', today)
+        .lte('reminder_date', until)
 
       if (res.error && looksLikeMissingColumnError(res.error.message)) {
         res = await supabase.from('activities').select('*')
@@ -136,18 +164,24 @@ export default function Layout() {
       }
 
       const rows = (res.data || [])
-        .map(a => normalizeRow(a, today))
+        .map(a => normalizeRow(a, today, until))
         .filter(Boolean)
         .sort((x, y) => {
-          if (x.overdue !== y.overdue) return x.overdue ? -1 : 1
-          if (x.dueToday !== y.dueToday) return x.dueToday ? -1 : 1
+          // urgent first
+          const xu = (x.overdue || x.dueToday)
+          const yu = (y.overdue || y.dueToday)
+          if (xu !== yu) return xu ? -1 : 1
+          // then soon
+          if (x.dueSoon !== y.dueSoon) return x.dueSoon ? -1 : 1
           return String(x.reminderTime || '00:00').localeCompare(String(y.reminderTime || '00:00'))
         })
 
       if (cancelled) return
       setAttentionReminders(rows)
+      setReminderBannerDismissed(false)
 
-      if (rows.length === 0) {
+      const urgentCount = rows.filter(r => r.overdue || r.dueToday).length
+      if (urgentCount === 0) {
         setReminderGateOpen(false)
         setReminderGateDismissed(false)
         return
@@ -167,17 +201,20 @@ export default function Layout() {
   // Tab title: show count + blink while reminders exist.
   useEffect(() => {
     const base = defaultTitleRef.current || 'Field Property CRM'
-    const count = attentionReminders.length
+    const count = reminderBuckets.urgent.length + reminderBuckets.soon.length
     let t = null
 
     if (count > 0) {
       const withCount = `(${count}) ${base}`
       let flip = false
       document.title = withCount
-      t = window.setInterval(() => {
-        flip = !flip
-        document.title = flip ? withCount : base
-      }, 1200)
+      // Blink only if urgent (overdue / due today).
+      if (reminderBuckets.urgent.length > 0) {
+        t = window.setInterval(() => {
+          flip = !flip
+          document.title = flip ? withCount : base
+        }, 900)
+      }
     } else {
       document.title = base
     }
@@ -185,7 +222,7 @@ export default function Layout() {
     return () => {
       if (t) window.clearInterval(t)
     }
-  }, [attentionReminders.length])
+  }, [reminderBuckets.urgent.length, reminderBuckets.soon.length])
 
   useEffect(() => {
     return () => {
@@ -554,8 +591,81 @@ export default function Layout() {
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
+      {/* Aggressive reminder banner (top-right) */}
+      {!reminderBannerDismissed && (reminderBuckets.urgent.length > 0 || reminderBuckets.soon.length > 0) && (
+        <ModalPortal>
+          <div
+            style={{
+              position: 'fixed',
+              top: 16,
+              right: 16,
+              zIndex: 9999,
+              maxWidth: 520,
+              width: 'calc(100vw - 32px)',
+            }}
+          >
+            <div
+              className={clsx(
+                "rounded-2xl shadow-2xl border-2 p-4",
+                reminderBuckets.urgent.length > 0
+                  ? "bg-red-600 border-red-400 text-white animate-pulse"
+                  : "bg-orange-400 border-orange-300 text-black"
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className={clsx(
+                    "font-extrabold tracking-wide",
+                    reminderBuckets.urgent.length > 0 ? "text-white text-lg" : "text-black text-base"
+                  )}>
+                    {reminderBuckets.anyOverdue
+                      ? '⚠️ OVERDUE REMINDER'
+                      : reminderBuckets.anyDueToday
+                        ? '⚠️ REMINDER DUE TODAY'
+                        : 'Upcoming reminder'}
+                  </p>
+                  <p className={clsx(
+                    "mt-1",
+                    reminderBuckets.urgent.length > 0 ? "text-white/90 text-sm" : "text-black/80 text-sm"
+                  )}>
+                    {reminderBuckets.urgent.length > 0
+                      ? `You have ${reminderBuckets.urgent.length} urgent reminder${reminderBuckets.urgent.length === 1 ? '' : 's'} that need attention.`
+                      : `You have ${reminderBuckets.soon.length} reminder${reminderBuckets.soon.length === 1 ? '' : 's'} due in the next 2 days.`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={clsx(
+                    "px-2 py-1 rounded-lg font-bold",
+                    reminderBuckets.urgent.length > 0 ? "text-white/90 hover:text-white" : "text-black/70 hover:text-black"
+                  )}
+                  onClick={() => setReminderBannerDismissed(true)}
+                  aria-label="Dismiss reminders banner"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className={clsx(
+                    "px-3 py-2 rounded-lg font-semibold",
+                    reminderBuckets.urgent.length > 0
+                      ? "bg-white/15 hover:bg-white/25 text-white"
+                      : "bg-white/50 hover:bg-white/70 text-black"
+                  )}
+                  onClick={() => navigate('/activities')}
+                >
+                  View →
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
       {/* Blocking reminders gate (shows on every app open if reminders exist) */}
-      {reminderGateOpen && attentionReminders.length > 0 && (
+      {reminderGateOpen && reminderBuckets.urgent.length > 0 && (
         <ModalPortal>
           <div
             style={{
@@ -574,33 +684,30 @@ export default function Layout() {
           >
             <div
               style={{
-                backgroundColor: 'var(--fieldcrm-panel)',
+                backgroundColor: '#b91c1c',
                 borderRadius: '12px',
                 padding: '22px',
                 width: '100%',
                 maxWidth: '640px',
                 maxHeight: '85vh',
                 overflowY: 'auto',
-                color: 'var(--fieldcrm-text)',
-                border: '2px solid rgba(239, 68, 68, 0.35)',
+                color: '#fff',
+                border: '2px solid rgba(255,255,255,0.25)',
               }}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-2xl font-extrabold text-field-black">
-                    ⚠️
-                  </p>
-                  <h2 className="font-display text-xl font-extrabold text-field-black mt-2">
-                    You have {attentionReminders.length} reminder{attentionReminders.length === 1 ? '' : 's'} that need attention!
+                  <h2 className="font-display text-2xl sm:text-3xl font-extrabold mt-1">
+                    ⚠️ OVERDUE REMINDER
                   </h2>
-                  <p className="text-sm text-field-stone mt-1">
-                    This will show every time you open the CRM while reminders exist.
+                  <p className="text-sm sm:text-base text-white/90 mt-2">
+                    You have {reminderBuckets.urgent.length} reminder{reminderBuckets.urgent.length === 1 ? '' : 's'} that need attention!
                   </p>
                 </div>
               </div>
 
               <div className="mt-4 space-y-3">
-                {attentionReminders.map((r) => (
+                {reminderBuckets.urgent.map((r) => (
                   <button
                     key={String(r.id)}
                     type="button"
@@ -611,24 +718,19 @@ export default function Layout() {
                     }}
                     className={clsx(
                       "w-full text-left rounded-xl border p-4",
-                      r.overdue
-                        ? "bg-red-100 border-red-400"
-                        : "bg-orange-100 border-orange-300"
+                      "bg-white/10 border-white/25 hover:bg-white/15"
                     )}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <p className={clsx("font-semibold truncate", r.overdue ? "text-red-900" : "text-orange-900")}>
+                        <p className="font-semibold truncate text-white">
                           {r.title}
                         </p>
-                        <p className={clsx("text-sm mt-1 truncate", r.overdue ? "text-red-900/80" : "text-orange-900/80")}>
+                        <p className="text-sm mt-1 truncate text-white/90">
                           {r.leadName ? `Lead: ${r.leadName} · ` : ''}{r.reminderDate}{r.reminderTime ? ` · ${r.reminderTime}` : ''}
                         </p>
                       </div>
-                      <span className={clsx(
-                        "text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0",
-                        r.overdue ? "bg-red-600 text-white" : "bg-orange-500 text-white"
-                      )}>
+                      <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-white text-red-700">
                         {r.overdue ? 'Overdue' : 'Due Today'}
                       </span>
                     </div>
@@ -639,7 +741,7 @@ export default function Layout() {
               <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="bg-white/15 hover:bg-white/25 text-white rounded-lg font-semibold px-4 py-3"
                   onClick={() => {
                     setReminderGateDismissed(true)
                     setReminderGateOpen(false)
@@ -649,7 +751,7 @@ export default function Layout() {
                 </button>
                 <button
                   type="button"
-                  className="btn-primary"
+                  className="bg-white text-red-700 hover:bg-white/90 rounded-lg font-extrabold px-4 py-3"
                   onClick={() => {
                     setReminderGateDismissed(true)
                     setReminderGateOpen(false)

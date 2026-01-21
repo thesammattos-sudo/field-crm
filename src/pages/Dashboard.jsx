@@ -261,14 +261,15 @@ export default function Dashboard() {
       }))
   }, [activities])
 
-  const attentionReminders = useMemo(() => {
+  const reminderRows = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd')
+    const todayPlus2 = format(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
 
     function isCompleted(a) {
       return !!(a?.completed ?? a?.done ?? false)
     }
 
-    const rows = (activities || [])
+    return (activities || [])
       .map(a => {
         const enabled = a?.reminder_enabled ?? a?.reminderEnabled ?? false
         if (!enabled) return null
@@ -276,16 +277,19 @@ export default function Dashboard() {
 
         const reminderDate = String(a?.reminder_date ?? a?.reminderDate ?? '').slice(0, 10)
         if (!reminderDate) return null
-        if (reminderDate > today) return null
+
+        const id = a?.id
+        if (id == null) return null
 
         const reminderTime = String(a?.reminder_time ?? a?.reminderTime ?? '').trim()
         const title = a?.title || a?.subject || 'Activity'
         const leadName = a?.lead_name ?? a?.leadName ?? a?.lead ?? ''
-        const id = a?.id
-        if (id == null) return null
 
         const overdue = reminderDate < today
         const dueToday = reminderDate === today
+        const dueSoon = reminderDate > today && reminderDate <= todayPlus2
+        const dueLater = reminderDate > todayPlus2
+
         return {
           id,
           title,
@@ -294,22 +298,27 @@ export default function Dashboard() {
           reminderTime,
           overdue,
           dueToday,
+          dueSoon,
+          dueLater,
         }
       })
       .filter(Boolean)
       .sort((x, y) => {
-        // overdue first
-        if (x.overdue !== y.overdue) return x.overdue ? -1 : 1
-        // then due today
-        if (x.dueToday !== y.dueToday) return x.dueToday ? -1 : 1
-        // then time
-        const xt = x.reminderTime || '00:00'
-        const yt = y.reminderTime || '00:00'
-        return xt.localeCompare(yt)
+        const xu = x.overdue || x.dueToday
+        const yu = y.overdue || y.dueToday
+        if (xu !== yu) return xu ? -1 : 1
+        if (x.dueSoon !== y.dueSoon) return x.dueSoon ? -1 : 1
+        return String(x.reminderDate).localeCompare(String(y.reminderDate)) || String(x.reminderTime || '00:00').localeCompare(String(y.reminderTime || '00:00'))
       })
-
-    return rows
   }, [activities])
+
+  const attentionReminders = useMemo(() => {
+    return reminderRows.filter(r => r.overdue || r.dueToday)
+  }, [reminderRows])
+
+  const upcomingReminders = useMemo(() => {
+    return reminderRows
+  }, [reminderRows])
 
   const activeLeads = useMemo(() => {
     return normalizedLeads.filter(l => !['won', 'lost'].includes(l.stage))
@@ -360,13 +369,13 @@ export default function Dashboard() {
     <div className="space-y-6 lg:space-y-8 animate-fade-in">
       {/* REMINDERS (top priority) */}
       {attentionReminders.length > 0 && (
-        <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-5">
+        <div className="rounded-2xl border-2 border-red-500 bg-red-600 p-5 text-white">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h2 className="font-display text-xl font-extrabold tracking-wide text-red-900">
+              <h2 className="font-display text-xl font-extrabold tracking-wide text-white">
                 ⚠️ REMINDERS
               </h2>
-              <p className="text-sm text-red-900/80 mt-1">
+              <p className="text-sm text-white/90 mt-1">
                 {attentionReminders.length} reminder{attentionReminders.length === 1 ? '' : 's'} need attention.
               </p>
             </div>
@@ -385,24 +394,19 @@ export default function Dashboard() {
                   to={`/activities?activity=${encodeURIComponent(String(r.id))}`}
                   className={clsx(
                     "block rounded-xl border p-4 transition-transform hover:-translate-y-0.5 hover:shadow-lg",
-                    r.overdue
-                      ? "bg-red-100 border-red-400 ring-2 ring-red-500 animate-pulse"
-                      : "bg-orange-100 border-orange-300 ring-2 ring-orange-400"
+                    "bg-red-700/80 border-red-300 animate-pulse"
                   )}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <p className={clsx("font-semibold truncate", r.overdue ? "text-red-900" : "text-orange-900")}>
+                      <p className="font-semibold truncate text-white">
                         {r.title}
                       </p>
-                      <p className={clsx("text-sm mt-1 truncate", r.overdue ? "text-red-900/80" : "text-orange-900/80")}>
+                      <p className="text-sm mt-1 truncate text-white/90">
                         {r.leadName ? `Lead: ${r.leadName} · ` : ''}{dateLabel} · {timeLabel}
                       </p>
                     </div>
-                    <span className={clsx(
-                      "text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0",
-                      r.overdue ? "bg-red-600 text-white" : "bg-orange-500 text-white"
-                    )}>
+                    <span className="text-xs font-extrabold uppercase tracking-wide px-3 py-1 rounded-full flex-shrink-0 bg-white text-red-700">
                       {r.overdue ? 'Overdue' : 'Due Today'}
                     </span>
                   </div>
@@ -603,6 +607,63 @@ export default function Dashboard() {
 
         {/* Right Column - 2 cols */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Upcoming Reminders */}
+          <div className="card-static p-5">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="font-semibold">Upcoming Reminders</h2>
+              <Link to="/activities" className="text-sm text-field-black font-medium hover:underline">View all →</Link>
+            </div>
+
+            {upcomingReminders.length === 0 ? (
+              <div className="text-sm text-field-stone py-4 text-center">
+                {loading ? 'Loading…' : 'No reminders'}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {upcomingReminders.slice(0, 8).map((r) => {
+                  const dateLabel = r.reminderDate ? format(new Date(r.reminderDate), 'MMM d, yyyy') : '—'
+                  const timeLabel = r.reminderTime ? r.reminderTime : '—'
+                  const urgent = r.overdue || r.dueToday
+                  return (
+                    <Link
+                      key={String(r.id)}
+                      to={`/activities?activity=${encodeURIComponent(String(r.id))}`}
+                      className={clsx(
+                        "block p-4 rounded-xl border transition-transform hover:-translate-y-0.5 hover:shadow-lg",
+                        urgent
+                          ? "bg-red-600 border-red-500 text-white animate-pulse"
+                          : r.dueSoon
+                            ? "bg-orange-100 border-orange-300"
+                            : "bg-field-sand border-gray-200"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className={clsx("text-sm font-semibold truncate", urgent ? "text-white" : "text-field-black")}>
+                            {r.title}
+                          </p>
+                          <p className={clsx("text-xs mt-1 truncate", urgent ? "text-white/90" : "text-field-stone")}>
+                            {r.leadName ? `Lead: ${r.leadName} · ` : ''}{dateLabel} · {timeLabel}
+                          </p>
+                        </div>
+                        <span className={clsx(
+                          "text-[10px] font-extrabold uppercase tracking-wide px-2.5 py-1 rounded-full flex-shrink-0",
+                          urgent
+                            ? "bg-white text-red-700"
+                            : r.dueSoon
+                              ? "bg-orange-500 text-white"
+                              : "bg-white border border-gray-200 text-field-stone"
+                        )}>
+                          {urgent ? (r.overdue ? 'Overdue' : 'Today') : (r.dueSoon ? 'Next 2 days' : 'Later')}
+                        </span>
+                      </div>
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Today's Tasks */}
           <div className="card-static p-5">
             <div className="flex justify-between items-center mb-4">
