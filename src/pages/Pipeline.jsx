@@ -6,6 +6,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
+import { useNavigate } from 'react-router-dom'
 
 const stageIdSet = new Set(pipelineStages.map(s => s.id))
 const stageLabelToId = Object.fromEntries(
@@ -56,25 +57,14 @@ const emptyLeadForm = {
   lastContactDate: '',
 }
 
-const emptyQuickActivity = {
-  title: '',
-  type: 'call',
-  due_date: '',
-  priority: 'medium',
-  notes: '',
-}
-
 export default function Pipeline() {
+  const navigate = useNavigate()
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const [activities, setActivities] = useState([])
-  const [showAddActivity, setShowAddActivity] = useState(false)
-  const [activitySaving, setActivitySaving] = useState(false)
-  const [activityError, setActivityError] = useState('')
-  const [activityForm, setActivityForm] = useState(emptyQuickActivity)
 
   const [editingLead, setEditingLead] = useState(null) // lead object or null for new
   const [showModal, setShowModal] = useState(false)
@@ -273,54 +263,13 @@ export default function Pipeline() {
     setEditingLead(null)
     setForm(emptyLeadForm)
     setConfirmDeleteOpen(false)
-    setShowAddActivity(false)
-    setActivityError('')
-    setActivityForm(emptyQuickActivity)
   }
 
-  function openAddActivityForLead() {
-    setActivityError('')
-    setActivityForm(emptyQuickActivity)
-    setShowAddActivity(true)
-  }
-
-  async function addActivityForLead(e) {
-    e.preventDefault()
-    if (!editingLead) return
-    setActivitySaving(true)
-    setActivityError('')
-
-    const leadName = String(form.name || editingLead.name || '').trim()
-    const payload = {
-      title: String(activityForm.title || '').trim(),
-      type: activityForm.type,
-      due_date: activityForm.due_date || null,
-      priority: activityForm.priority,
-      completed: false,
-      lead_name: leadName || null,
-      notes: String(activityForm.notes || '').trim() || null,
-    }
-    // omit lead_name if empty
-    if (!leadName) delete payload.lead_name
-
-    let res = await supabase.from('activities').insert(payload).select('*').single()
-    if (res.error && looksLikeMissingColumnError(res.error.message)) {
-      // minimal fallback
-      const minimal = { title: payload.title, type: payload.type, due_date: payload.due_date, priority: payload.priority }
-      if (payload.lead_name) minimal.lead_name = payload.lead_name
-      res = await supabase.from('activities').insert(minimal).select('*').single()
-    }
-
-    if (res.error) {
-      setActivityError(res.error.message || 'Failed to add activity.')
-      setActivitySaving(false)
-      return
-    }
-
-    setActivities(prev => [normalizeDbActivity(res.data || {}), ...prev])
-    setActivitySaving(false)
-    setShowAddActivity(false)
-    setActivityForm(emptyQuickActivity)
+  function viewActivitiesForLead() {
+    const leadName = String(editingLead?.name || '').trim()
+    if (!leadName) return
+    closeModal()
+    navigate(`/activities?lead=${encodeURIComponent(leadName)}`)
   }
 
   async function saveLead(e) {
@@ -669,44 +618,6 @@ export default function Pipeline() {
                   />
                 </div>
 
-                {editingLead && (
-                  <div className="pt-4 border-t border-gray-100">
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-semibold text-field-black">Activities</h3>
-                      <button type="button" className="btn-secondary !px-3 !py-2" onClick={openAddActivityForLead}>
-                        + Add Activity
-                      </button>
-                    </div>
-
-                    <div className="mt-3 space-y-2">
-                      {(activitiesByLead.get(normalizeNameKey(form.name || editingLead.name)) || []).map((a) => {
-                        const dueLabel = a.due_date ? format(new Date(a.due_date), 'MMM d, yyyy') : 'No due date'
-                        return (
-                          <div key={a.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-field-sand">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-field-black truncate">{a.title}</p>
-                              <p className="text-[11px] text-field-stone">
-                                {String(a.type).replace('_', ' ')} · {dueLabel}
-                              </p>
-                            </div>
-                            <span className={clsx(
-                              "text-[11px] font-semibold px-2 py-1 rounded-full",
-                              a.completed ? "bg-field-black text-white" : "bg-white border border-gray-200 text-field-black"
-                            )}>
-                              {a.completed ? 'Completed' : 'Pending'}
-                            </span>
-                          </div>
-                        )
-                      })}
-                      {(activitiesByLead.get(normalizeNameKey(form.name || editingLead.name)) || []).length === 0 && (
-                        <div className="text-sm text-field-stone py-2">
-                          No activities linked to this lead yet.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
                 <div className="flex items-center justify-end gap-3 pt-2">
                   {editingLead && (
                     <button
@@ -754,126 +665,18 @@ export default function Pipeline() {
                   >
                     <MessageCircle className="w-4 h-4" /> WhatsApp
                   </a>
+                  <button
+                    type="button"
+                    className="btn-secondary w-full mt-3"
+                    onClick={viewActivitiesForLead}
+                  >
+                    View Activities
+                  </button>
                   <p className="text-xs text-field-stone mt-2">
                     Current stage: {stageLabelById[form.stage] || form.stage}
                   </p>
                 </div>
               )}
-            </div>
-          </div>
-        </ModalPortal>
-      )}
-
-      {showAddActivity && editingLead && (
-        <ModalPortal>
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '16px',
-          }} onClick={() => setShowAddActivity(false)}>
-            <div style={{
-              backgroundColor: 'var(--fieldcrm-panel)',
-              borderRadius: '8px',
-              padding: '24px',
-              width: '100%',
-              maxWidth: '450px',
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              color: 'var(--fieldcrm-text)',
-            }} onClick={(e) => e.stopPropagation()}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Add Activity</h2>
-                <button type="button" onClick={() => setShowAddActivity(false)} disabled={activitySaving}>✕</button>
-              </div>
-
-              {activityError && (
-                <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
-                  {activityError}
-                </div>
-              )}
-
-              <p className="text-sm text-field-stone mb-4">
-                Lead: <span className="font-semibold text-field-black">{form.name || editingLead.name}</span>
-              </p>
-
-              <form onSubmit={addActivityForLead} className="space-y-4">
-                <div>
-                  <label className="text-xs text-field-stone-light">Title</label>
-                  <input
-                    className="input mt-1"
-                    value={activityForm.title}
-                    onChange={(e) => setActivityForm(f => ({ ...f, title: e.target.value }))}
-                    required
-                  />
-                </div>
-
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs text-field-stone-light">Type</label>
-                    <select
-                      className="input mt-1"
-                      value={activityForm.type}
-                      onChange={(e) => setActivityForm(f => ({ ...f, type: e.target.value }))}
-                    >
-                      <option value="call">Call</option>
-                      <option value="email">Email</option>
-                      <option value="meeting">Meeting</option>
-                      <option value="site_visit">Site Visit</option>
-                      <option value="whatsapp">WhatsApp</option>
-                      <option value="follow_up">Follow-up</option>
-                      <option value="document_sent">Document Sent</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-field-stone-light">Due date</label>
-                    <input
-                      type="date"
-                      className="input mt-1"
-                      value={activityForm.due_date}
-                      onChange={(e) => setActivityForm(f => ({ ...f, due_date: e.target.value }))}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs text-field-stone-light">Priority</label>
-                    <select
-                      className="input mt-1"
-                      value={activityForm.priority}
-                      onChange={(e) => setActivityForm(f => ({ ...f, priority: e.target.value }))}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs text-field-stone-light">Notes</label>
-                  <textarea
-                    className="input mt-1 min-h-[90px]"
-                    value={activityForm.notes}
-                    onChange={(e) => setActivityForm(f => ({ ...f, notes: e.target.value }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-2">
-                  <button type="button" className="btn-secondary" onClick={() => setShowAddActivity(false)} disabled={activitySaving}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn-primary" disabled={activitySaving}>
-                    {activitySaving ? 'Saving…' : 'Add Activity'}
-                  </button>
-                </div>
-              </form>
             </div>
           </div>
         </ModalPortal>

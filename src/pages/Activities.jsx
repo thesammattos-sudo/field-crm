@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import ModalPortal from '../components/ModalPortal'
 import ConfirmDialog from '../components/ConfirmDialog'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 const getActivityIcon = (type) => {
   const icons = {
@@ -77,6 +78,8 @@ function isToday(dateValue) {
 }
 
 export default function Activities() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [filter, setFilter] = useState('all')
   const [activities, setActivities] = useState([])
   const [loading, setLoading] = useState(true)
@@ -98,6 +101,13 @@ export default function Activities() {
   const [attachmentFile, setAttachmentFile] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null) // activity
   const [collapsedGroups, setCollapsedGroups] = useState(() => ({}))
+
+  const leadFilter = useMemo(() => {
+    const lead = new URLSearchParams(location.search).get('lead')
+    return String(lead || '').trim()
+  }, [location.search])
+
+  const leadFilterKey = useMemo(() => leadFilter.toLowerCase(), [leadFilter])
 
   async function fetchActivities() {
     setLoading(true)
@@ -145,9 +155,14 @@ export default function Activities() {
     })
   }, [activities, filter])
 
+  const filteredActivitiesForLead = useMemo(() => {
+    if (!leadFilter) return filteredActivities
+    return filteredActivities.filter(a => String(a.leadName || '').trim().toLowerCase() === leadFilterKey)
+  }, [filteredActivities, leadFilter, leadFilterKey])
+
   const groupedActivities = useMemo(() => {
     const map = new Map()
-    for (const a of filteredActivities) {
+    for (const a of filteredActivitiesForLead) {
       const name = String(a.leadName || '').trim()
       const key = name || 'General'
       const arr = map.get(key) || []
@@ -172,7 +187,14 @@ export default function Activities() {
       const pendingCount = items.filter(i => !i.completed).length
       return { group: k, items, pendingCount }
     })
-  }, [filteredActivities])
+  }, [filteredActivitiesForLead])
+
+  function clearLeadFilter() {
+    const params = new URLSearchParams(location.search)
+    params.delete('lead')
+    const next = params.toString()
+    navigate(next ? `/activities?${next}` : '/activities')
+  }
 
   function openAddModal() {
     setEditing(null)
@@ -378,6 +400,20 @@ export default function Activities() {
         </div>
         <button className="btn-primary" onClick={openAddModal}>+ Add Activity</button>
       </div>
+
+      {leadFilter && (
+        <div className="mb-4 p-3 rounded-xl bg-field-sand border border-gray-200 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-field-black truncate">
+              Viewing activities for: <span className="font-semibold">{leadFilter}</span>
+            </p>
+            <p className="text-xs text-field-stone">Clear the filter to see all leads.</p>
+          </div>
+          <button type="button" className="btn-secondary !px-3 !py-2" onClick={clearLeadFilter}>
+            Clear
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
