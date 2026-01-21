@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import ModalPortal from '../components/ModalPortal'
 import ConfirmDialog from '../components/ConfirmDialog'
+import { projects as seedProjects } from '../data'
 
 const getActivityIcon = (type) => {
   const icons = {
@@ -86,7 +87,10 @@ export default function Activities() {
 
   // Options for dropdowns (we save names as text).
   const [leadOptions, setLeadOptions] = useState([])
-  const [projectOptions, setProjectOptions] = useState([])
+  const [projectOptions, setProjectOptions] = useState(() => {
+    const names = (seedProjects || []).map(p => p?.name).filter(Boolean)
+    return Array.from(new Set(names)).map((name) => ({ id: name, name }))
+  })
 
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -127,11 +131,23 @@ export default function Activities() {
     ;(async () => {
       const leadsRes = await supabase.from('leads').select('id,name')
       if (!leadsRes.error && Array.isArray(leadsRes.data) && leadsRes.data.length) {
-        setLeadOptions(leadsRes.data.map(l => ({ id: String(l.id), name: l.name })))
+        setLeadOptions(leadsRes.data.filter(l => l?.name).map(l => ({ id: String(l.id), name: l.name })))
       }
       const projectsRes = await supabase.from('projects').select('id,name')
       if (!projectsRes.error && Array.isArray(projectsRes.data) && projectsRes.data.length) {
-        setProjectOptions(projectsRes.data.map(p => ({ id: String(p.id), name: p.name })))
+        const db = projectsRes.data.filter(p => p?.name).map(p => ({ id: String(p.id), name: p.name }))
+        setProjectOptions(prev => {
+          const merged = [...(prev || []), ...db]
+          const seen = new Set()
+          const out = []
+          for (const item of merged) {
+            const key = String(item.name).trim().toLowerCase()
+            if (!key || seen.has(key)) continue
+            seen.add(key)
+            out.push(item)
+          }
+          return out
+        })
       }
     })()
   }, [])
@@ -545,7 +561,7 @@ export default function Activities() {
                       value={form.leadName}
                       onChange={(e) => setForm(f => ({ ...f, leadName: e.target.value }))}
                     >
-                      <option value="">—</option>
+                      <option value="">Select a lead…</option>
                       {leadOptions.map(l => (
                         <option key={l.id} value={l.name}>{l.name}</option>
                       ))}
@@ -560,7 +576,7 @@ export default function Activities() {
                       value={form.projectName}
                       onChange={(e) => setForm(f => ({ ...f, projectName: e.target.value }))}
                     >
-                      <option value="">—</option>
+                      <option value="">Select a project…</option>
                       {projectOptions.map(p => (
                         <option key={p.id} value={p.name}>{p.name}</option>
                       ))}
