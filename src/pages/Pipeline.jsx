@@ -5,6 +5,7 @@ import ModalPortal from '../components/ModalPortal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
+import { format } from 'date-fns'
 
 const emptyLeadForm = {
   name: '',
@@ -18,11 +19,25 @@ const emptyLeadForm = {
   lastContactDate: '',
 }
 
+const emptyQuickActivity = {
+  title: '',
+  type: 'call',
+  due_date: '',
+  priority: 'medium',
+  notes: '',
+}
+
 export default function Pipeline() {
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  const [activities, setActivities] = useState([])
+  const [showAddActivity, setShowAddActivity] = useState(false)
+  const [activitySaving, setActivitySaving] = useState(false)
+  const [activityError, setActivityError] = useState('')
+  const [activityForm, setActivityForm] = useState(emptyQuickActivity)
 
   const [editingLead, setEditingLead] = useState(null) // lead object or null for new
   const [showModal, setShowModal] = useState(false)
@@ -44,6 +59,25 @@ export default function Pipeline() {
   function looksLikeMissingColumnError(message) {
     if (!message) return false
     return message.includes('column') && message.includes('does not exist')
+  }
+
+  function normalizeNameKey(value) {
+    return String(value || '').trim().toLowerCase()
+  }
+
+  function normalizeDbActivity(row) {
+    const due = row.due_date ?? row.dueDate ?? row.time ?? null
+    const completed = row.completed ?? row.done ?? false
+    const leadName = row.lead_name ?? row.leadName ?? row.lead ?? null
+    return {
+      id: row.id,
+      title: row.title ?? row.subject ?? '',
+      type: row.type ?? 'follow_up',
+      due_date: due,
+      completed: !!completed,
+      leadName: leadName ? String(leadName) : '',
+      priority: row.priority ?? 'medium',
+    }
   }
 
   function normalizeDbLead(row) {
@@ -93,10 +127,70 @@ export default function Pipeline() {
     setLoading(false)
   }
 
+  async function fetchActivitiesForPipeline() {
+    let res = await supabase
+      .from('activities')
+      .select('*')
+      .order('due_date', { ascending: true })
+
+    if (res.error && looksLikeMissingColumnError(res.error.message)) {
+      res = await supabase.from('activities').select('*')
+    }
+
+    if (res.error) {
+      // Don't hard-fail the pipeline if activities table isn't ready.
+      return
+    }
+
+    setActivities((res.data || []).map(normalizeDbActivity))
+  }
+
   useEffect(() => {
-    fetchLeadsFromSupabase()
+    ;(async () => {
+      setLoading(true)
+      await Promise.all([fetchLeadsFromSupabase(), fetchActivitiesForPipeline()])
+      setLoading(false)
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const activitiesByLead = useMemo(() => {
+    const map = new Map()
+    for (const a of activities) {
+      const key = normalizeNameKey(a.leadName)
+      if (!key) continue
+      const arr = map.get(key) || []
+      arr.push(a)
+      map.set(key, arr)
+    }
+    // sort each list by due date then title
+    for (const [k, arr] of map.entries()) {
+      arr.sort((x, y) => {
+        const xd = x.due_date ? new Date(x.due_date).getTime() : Number.POSITIVE_INFINITY
+        const yd = y.due_date ? new Date(y.due_date).getTime() : Number.POSITIVE_INFINITY
+        if (xd !== yd) return xd - yd
+        return String(x.title || '').localeCompare(String(y.title || ''))
+      })
+      map.set(k, arr)
+    }
+    return map
+  }, [activities])
+
+  function pendingCountForLeadName(leadName) {
+    const list = activitiesByLead.get(normalizeNameKey(leadName)) || []
+    return list.filter(a => !a.completed).length
+  }
+
+  function nextPendingDueForLeadName(leadName) {
+    const list = activitiesByLead.get(normalizeNameKey(leadName)) || []
+    const pending = list.filter(a => !a.completed && a.due_date)
+    if (pending.length === 0) return null
+    const min = pending
+      .map(a => new Date(a.due_date))
+      .filter(d => !Number.isNaN(d.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime())[0]
+    return min || null
+  }
 
   function openAddModal() {
     setError('')
@@ -129,6 +223,54 @@ export default function Pipeline() {
     setEditingLead(null)
     setForm(emptyLeadForm)
     setConfirmDeleteOpen(false)
+    setShowAddActivity(false)
+    setActivityError('')
+    setActivityForm(emptyQuickActivity)
+  }
+
+  function openAddActivityForLead() {
+    setActivityError('')
+    setActivityForm(emptyQuickActivity)
+    setShowAddActivity(true)
+  }
+
+  async function addActivityForLead(e) {
+    e.preventDefault()
+    if (!editingLead) return
+    setActivitySaving(true)
+    setActivityError('')
+
+    const leadName = String(form.name || editingLead.name || '').trim()
+    const payload = {
+      title: String(activityForm.title || '').trim(),
+      type: activityForm.type,
+      due_date: activityForm.due_date || null,
+      priority: activityForm.priority,
+      completed: false,
+      lead_name: leadName || null,
+      notes: String(activityForm.notes || '').trim() || null,
+    }
+    // omit lead_name if empty
+    if (!leadName) delete payload.lead_name
+
+    let res = await supabase.from('activities').insert(payload).select('*').single()
+    if (res.error && looksLikeMissingColumnError(res.error.message)) {
+      // minimal fallback
+      const minimal = { title: payload.title, type: payload.type, due_date: payload.due_date, priority: payload.priority }
+      if (payload.lead_name) minimal.lead_name = payload.lead_name
+      res = await supabase.from('activities').insert(minimal).select('*').single()
+    }
+
+    if (res.error) {
+      setActivityError(res.error.message || 'Failed to add activity.')
+      setActivitySaving(false)
+      return
+    }
+
+    setActivities(prev => [normalizeDbActivity(res.data || {}), ...prev])
+    setActivitySaving(false)
+    setShowAddActivity(false)
+    setActivityForm(emptyQuickActivity)
   }
 
   async function saveLead(e) {
@@ -162,6 +304,8 @@ export default function Pipeline() {
 
     const isEditing = !!editingLead
     const dbId = editingLead?.dbId ?? null
+    const prevName = editingLead?.name || ''
+    const nextName = form.name.trim()
 
     let res
     if (isEditing && dbId) {
@@ -194,6 +338,14 @@ export default function Pipeline() {
       }
       return [saved, ...prev]
     })
+
+    // Keep activities linked when lead name changes (best effort).
+    if (isEditing && prevName && nextName && prevName !== nextName) {
+      const actRes = await supabase.from('activities').update({ lead_name: nextName }).eq('lead_name', prevName)
+      if (!actRes.error) {
+        setActivities(prev => prev.map(a => (normalizeNameKey(a.leadName) === normalizeNameKey(prevName) ? { ...a, leadName: nextName } : a)))
+      }
+    }
 
     setSaving(false)
     closeModal()
@@ -277,18 +429,21 @@ export default function Pipeline() {
                 {loading && i === 0 && (
                   <div className="text-xs text-field-stone px-1">Syncing leads…</div>
                 )}
-                {stageLeads.map((lead, j) => (
-                  <div 
-                    key={lead.uid}
-                    className="card p-4 cursor-pointer animate-fade-in"
-                    style={{ animationDelay: `${(i * 50) + (j * 80)}ms` }}
-                    onClick={() => openEditModal(lead)}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/lead-uid', lead.uid)
-                      e.dataTransfer.effectAllowed = 'move'
-                    }}
-                  >
+                {stageLeads.map((lead, j) => {
+                  const pendingCount = pendingCountForLeadName(lead.name)
+                  const nextDue = nextPendingDueForLeadName(lead.name)
+                  return (
+                    <div 
+                      key={lead.uid}
+                      className="card p-4 cursor-pointer animate-fade-in"
+                      style={{ animationDelay: `${(i * 50) + (j * 80)}ms` }}
+                      onClick={() => openEditModal(lead)}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/lead-uid', lead.uid)
+                        e.dataTransfer.effectAllowed = 'move'
+                      }}
+                    >
                     <div className="flex justify-between items-start mb-2">
                       <span className="font-semibold text-sm">{lead.name}</span>
                       <div className="flex items-center gap-2">
@@ -313,11 +468,21 @@ export default function Pipeline() {
                     <p className="font-display text-xl font-semibold text-field-black mb-2">{lead.budgetDisplay}</p>
                     <p className="text-xs text-field-stone mb-3">{lead.interestedIn} {lead.interestedUnit && `- ${lead.interestedUnit}`}</p>
                     <div className="flex justify-between items-center">
-                      <span className="text-[11px] text-field-stone bg-field-sand px-2 py-1 rounded">{lead.source}</span>
-                      <span className="text-[11px] text-field-stone-light">{lead.nextActivityDisplay}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-field-stone bg-field-sand px-2 py-1 rounded">{lead.source}</span>
+                        {pendingCount > 0 && (
+                          <span className="text-[11px] font-semibold text-field-black bg-field-sand px-2 py-1 rounded">
+                            {pendingCount} task{pendingCount === 1 ? '' : 's'}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-field-stone-light">
+                        {nextDue ? format(nextDue, 'MMM d') : (lead.nextActivityDisplay || '')}
+                      </span>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )
@@ -454,6 +619,44 @@ export default function Pipeline() {
                   />
                 </div>
 
+                {editingLead && (
+                  <div className="pt-4 border-t border-gray-100">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-semibold text-field-black">Activities</h3>
+                      <button type="button" className="btn-secondary !px-3 !py-2" onClick={openAddActivityForLead}>
+                        + Add Activity
+                      </button>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {(activitiesByLead.get(normalizeNameKey(form.name || editingLead.name)) || []).map((a) => {
+                        const dueLabel = a.due_date ? format(new Date(a.due_date), 'MMM d, yyyy') : 'No due date'
+                        return (
+                          <div key={a.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-field-sand">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-field-black truncate">{a.title}</p>
+                              <p className="text-[11px] text-field-stone">
+                                {String(a.type).replace('_', ' ')} · {dueLabel}
+                              </p>
+                            </div>
+                            <span className={clsx(
+                              "text-[11px] font-semibold px-2 py-1 rounded-full",
+                              a.completed ? "bg-field-black text-white" : "bg-white border border-gray-200 text-field-black"
+                            )}>
+                              {a.completed ? 'Completed' : 'Pending'}
+                            </span>
+                          </div>
+                        )
+                      })}
+                      {(activitiesByLead.get(normalizeNameKey(form.name || editingLead.name)) || []).length === 0 && (
+                        <div className="text-sm text-field-stone py-2">
+                          No activities linked to this lead yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-end gap-3 pt-2">
                   {editingLead && (
                     <button
@@ -506,6 +709,121 @@ export default function Pipeline() {
                   </p>
                 </div>
               )}
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {showAddActivity && editingLead && (
+        <ModalPortal>
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '16px',
+          }} onClick={() => setShowAddActivity(false)}>
+            <div style={{
+              backgroundColor: 'var(--fieldcrm-panel)',
+              borderRadius: '8px',
+              padding: '24px',
+              width: '100%',
+              maxWidth: '450px',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              color: 'var(--fieldcrm-text)',
+            }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Add Activity</h2>
+                <button type="button" onClick={() => setShowAddActivity(false)} disabled={activitySaving}>✕</button>
+              </div>
+
+              {activityError && (
+                <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+                  {activityError}
+                </div>
+              )}
+
+              <p className="text-sm text-field-stone mb-4">
+                Lead: <span className="font-semibold text-field-black">{form.name || editingLead.name}</span>
+              </p>
+
+              <form onSubmit={addActivityForLead} className="space-y-4">
+                <div>
+                  <label className="text-xs text-field-stone-light">Title</label>
+                  <input
+                    className="input mt-1"
+                    value={activityForm.title}
+                    onChange={(e) => setActivityForm(f => ({ ...f, title: e.target.value }))}
+                    required
+                  />
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-field-stone-light">Type</label>
+                    <select
+                      className="input mt-1"
+                      value={activityForm.type}
+                      onChange={(e) => setActivityForm(f => ({ ...f, type: e.target.value }))}
+                    >
+                      <option value="call">Call</option>
+                      <option value="email">Email</option>
+                      <option value="meeting">Meeting</option>
+                      <option value="site_visit">Site Visit</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="follow_up">Follow-up</option>
+                      <option value="document_sent">Document Sent</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-field-stone-light">Due date</label>
+                    <input
+                      type="date"
+                      className="input mt-1"
+                      value={activityForm.due_date}
+                      onChange={(e) => setActivityForm(f => ({ ...f, due_date: e.target.value }))}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-xs text-field-stone-light">Priority</label>
+                    <select
+                      className="input mt-1"
+                      value={activityForm.priority}
+                      onChange={(e) => setActivityForm(f => ({ ...f, priority: e.target.value }))}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-field-stone-light">Notes</label>
+                  <textarea
+                    className="input mt-1 min-h-[90px]"
+                    value={activityForm.notes}
+                    onChange={(e) => setActivityForm(f => ({ ...f, notes: e.target.value }))}
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button type="button" className="btn-secondary" onClick={() => setShowAddActivity(false)} disabled={activitySaving}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={activitySaving}>
+                    {activitySaving ? 'Saving…' : 'Add Activity'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </ModalPortal>

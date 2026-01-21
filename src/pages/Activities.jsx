@@ -97,6 +97,7 @@ export default function Activities() {
   const [form, setForm] = useState(emptyActivityForm)
   const [attachmentFile, setAttachmentFile] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null) // activity
+  const [collapsedGroups, setCollapsedGroups] = useState(() => ({}))
 
   async function fetchActivities() {
     setLoading(true)
@@ -143,6 +144,35 @@ export default function Activities() {
       return true
     })
   }, [activities, filter])
+
+  const groupedActivities = useMemo(() => {
+    const map = new Map()
+    for (const a of filteredActivities) {
+      const name = String(a.leadName || '').trim()
+      const key = name || 'General'
+      const arr = map.get(key) || []
+      arr.push(a)
+      map.set(key, arr)
+    }
+
+    // Sort groups: General first, then A→Z
+    const keys = Array.from(map.keys()).sort((a, b) => {
+      if (a === 'General') return -1
+      if (b === 'General') return 1
+      return a.localeCompare(b)
+    })
+
+    return keys.map(k => {
+      const items = (map.get(k) || []).slice().sort((x, y) => {
+        const xd = x.due_date ? new Date(x.due_date).getTime() : Number.POSITIVE_INFINITY
+        const yd = y.due_date ? new Date(y.due_date).getTime() : Number.POSITIVE_INFINITY
+        if (xd !== yd) return xd - yd
+        return String(x.title || '').localeCompare(String(y.title || ''))
+      })
+      const pendingCount = items.filter(i => !i.completed).length
+      return { group: k, items, pendingCount }
+    })
+  }, [filteredActivities])
 
   function openAddModal() {
     setEditing(null)
@@ -375,90 +405,117 @@ export default function Activities() {
         {loading ? (
           <div className="text-sm text-field-stone">Loading activities…</div>
         ) : (
-          <div className="space-y-3">
-            {filteredActivities.map((activity, i) => {
-              const dueLabel = activity.due_date
-                ? (isToday(activity.due_date) ? 'Today' : format(new Date(activity.due_date), 'MMM d, yyyy'))
-                : 'No due date'
-
-              const leadName = activity.leadName || null
-              const projectName = activity.projectName || null
-
+          <div className="space-y-5">
+            {groupedActivities.map(({ group, items, pendingCount }) => {
+              const isCollapsed = !!collapsedGroups[group]
               return (
-                <div
-                  key={activity.id ?? i}
-                  className={clsx(
-                    "flex items-center gap-4 p-4 rounded-xl border-l-4 transition-all animate-fade-in",
-                    activity.completed ? "bg-gray-50 border-gray-300 opacity-60" : "bg-field-sand",
-                    !activity.completed && getPriorityColor(activity.priority)
+                <div key={group} className="border border-gray-200 rounded-xl overflow-hidden">
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-field-sand hover:bg-gray-200 transition-colors"
+                    onClick={() => setCollapsedGroups(prev => ({ ...prev, [group]: !prev[group] }))}
+                  >
+                    <div className="min-w-0 text-left">
+                      <p className="font-semibold text-field-black truncate">
+                        {group}
+                      </p>
+                      <p className="text-xs text-field-stone mt-0.5">
+                        {items.length} activit{items.length === 1 ? 'y' : 'ies'} · {pendingCount} pending
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-field-black bg-white border border-gray-200 px-2.5 py-1 rounded-full">
+                      {isCollapsed ? 'Show' : 'Hide'}
+                    </span>
+                  </button>
+
+                  {!isCollapsed && (
+                    <div className="p-3 space-y-3">
+                      {items.map((activity, i) => {
+                        const dueLabel = activity.due_date
+                          ? (isToday(activity.due_date) ? 'Today' : format(new Date(activity.due_date), 'MMM d, yyyy'))
+                          : 'No due date'
+
+                        const projectName = activity.projectName || null
+
+                        return (
+                          <div
+                            key={activity.id ?? `${group}-${i}`}
+                            className={clsx(
+                              "flex items-center gap-4 p-4 rounded-xl border-l-4 transition-all animate-fade-in",
+                              activity.completed ? "bg-gray-50 border-gray-300 opacity-60" : "bg-field-sand",
+                              !activity.completed && getPriorityColor(activity.priority)
+                            )}
+                            style={{ animationDelay: `${i * 30}ms` }}
+                          >
+                            <div className={clsx(
+                              "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
+                              activity.completed ? "bg-gray-200" : "bg-white border border-gray-200"
+                            )}>
+                              {getActivityIcon(activity.type)}
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <p className={clsx("font-medium", activity.completed && "line-through text-field-stone")}>
+                                {activity.title}
+                              </p>
+                              <p className="text-sm text-field-stone">
+                                {activity.contact || '—'}
+                                {projectName && <span className="ml-2 text-field-stone-light">· Project: {projectName}</span>}
+                                {activity.location && (
+                                  <span className="inline-flex items-center gap-1 ml-2">
+                                    <MapPin className="w-3 h-3" /> {activity.location}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="text-right flex-shrink-0">
+                              <p className={clsx(
+                                "text-sm font-medium",
+                                isToday(activity.due_date) && !activity.completed ? "text-field-black" : "text-field-stone"
+                              )}>
+                                {dueLabel}
+                              </p>
+                              <p className={clsx(
+                                "text-xs font-semibold uppercase",
+                                activity.priority === 'high' ? "text-field-gold" : "text-field-stone-light"
+                              )}>
+                                {activity.priority}
+                              </p>
+                            </div>
+
+                            <input
+                              type="checkbox"
+                              className="h-5 w-5 rounded border-gray-300 accent-field-black"
+                              checked={!!activity.completed}
+                              onChange={() => toggleCompleted(activity)}
+                              aria-label="Mark complete"
+                            />
+
+                            <button
+                              className="w-9 h-9 rounded-lg hover:bg-white/60 flex items-center justify-center transition-colors"
+                              title="Edit"
+                              onClick={() => openEditModal(activity)}
+                            >
+                              <Pencil className="w-4 h-4 text-field-stone" />
+                            </button>
+                            <button
+                              className="w-9 h-9 rounded-lg hover:bg-red-50 flex items-center justify-center transition-colors"
+                              title="Delete"
+                              onClick={() => setConfirmDelete(activity)}
+                            >
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
-                  style={{ animationDelay: `${i * 50}ms` }}
-                >
-                  <div className={clsx(
-                    "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-                    activity.completed ? "bg-gray-200" : "bg-white border border-gray-200"
-                  )}>
-                    {getActivityIcon(activity.type)}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className={clsx("font-medium", activity.completed && "line-through text-field-stone")}>
-                      {activity.title}
-                    </p>
-                    <p className="text-sm text-field-stone">
-                      {activity.contact || '—'}
-                      {leadName && <span className="ml-2 text-field-stone-light">· Lead: {leadName}</span>}
-                      {projectName && <span className="ml-2 text-field-stone-light">· Project: {projectName}</span>}
-                      {activity.location && (
-                        <span className="inline-flex items-center gap-1 ml-2">
-                          <MapPin className="w-3 h-3" /> {activity.location}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="text-right flex-shrink-0">
-                    <p className={clsx(
-                      "text-sm font-medium",
-                      isToday(activity.due_date) && !activity.completed ? "text-field-black" : "text-field-stone"
-                    )}>
-                      {dueLabel}
-                    </p>
-                    <p className={clsx(
-                      "text-xs font-semibold uppercase",
-                      activity.priority === 'high' ? "text-field-gold" : "text-field-stone-light"
-                    )}>
-                      {activity.priority}
-                    </p>
-                  </div>
-
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 rounded border-gray-300 accent-field-black"
-                    checked={!!activity.completed}
-                    onChange={() => toggleCompleted(activity)}
-                    aria-label="Mark complete"
-                  />
-
-                  <button
-                    className="w-9 h-9 rounded-lg hover:bg-white/60 flex items-center justify-center transition-colors"
-                    title="Edit"
-                    onClick={() => openEditModal(activity)}
-                  >
-                    <Pencil className="w-4 h-4 text-field-stone" />
-                  </button>
-                  <button
-                    className="w-9 h-9 rounded-lg hover:bg-red-50 flex items-center justify-center transition-colors"
-                    title="Delete"
-                    onClick={() => setConfirmDelete(activity)}
-                  >
-                    <Trash2 className="w-4 h-4 text-red-600" />
-                  </button>
                 </div>
               )
             })}
 
-            {filteredActivities.length === 0 && (
+            {groupedActivities.length === 0 && (
               <div className="text-center py-12 text-field-stone">
                 <p>No activities found</p>
               </div>
