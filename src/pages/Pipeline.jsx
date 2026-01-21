@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Phone, Mail, MessageCircle } from 'lucide-react'
-import { leads as initialLeads, pipelineStages } from '../data'
+import { pipelineStages } from '../data'
 import ModalPortal from '../components/ModalPortal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import clsx from 'clsx'
@@ -19,15 +19,8 @@ const emptyLeadForm = {
 }
 
 export default function Pipeline() {
-  const [leads, setLeads] = useState(() => (
-    (initialLeads || []).map(l => ({
-      ...l,
-      uid: `local-${l.id}`,
-      dbId: null,
-      lastContactDate: l.lastContactDate || l.createdAt || '',
-    }))
-  ))
-  const [loading, setLoading] = useState(false)
+  const [leads, setLeads] = useState([])
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -51,15 +44,6 @@ export default function Pipeline() {
   function looksLikeMissingColumnError(message) {
     if (!message) return false
     return message.includes('column') && message.includes('does not exist')
-  }
-
-  function leadKey(lead) {
-    const email = (lead.email || '').toString().trim().toLowerCase()
-    if (email) return `email:${email}`
-    const phone = (lead.phone || '').toString().replace(/[^0-9]/g, '')
-    if (phone) return `phone:${phone}`
-    const name = (lead.name || '').toString().trim().toLowerCase()
-    return `name:${name}`
   }
 
   function normalizeDbLead(row) {
@@ -105,19 +89,7 @@ export default function Pipeline() {
     }
 
     const dbLeads = (res.data || []).map(normalizeDbLead)
-    if (dbLeads.length === 0) {
-      setLoading(false)
-      return
-    }
-
-    setLeads(prev => {
-      const map = new Map()
-      // Start with local leads
-      for (const l of prev) map.set(leadKey(l), l)
-      // Overlay/append Supabase leads
-      for (const l of dbLeads) map.set(leadKey(l), l)
-      return Array.from(map.values())
-    })
+    setLeads(dbLeads)
     setLoading(false)
   }
 
