@@ -3,14 +3,49 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --fieldcrm-bg: #fafafa;
+    --fieldcrm-panel: #ffffff;
+    --fieldcrm-panel-2: #f5f5f5;
+    --fieldcrm-border: #e5e7eb;
+    --fieldcrm-text: #1a1a1a;
+    --fieldcrm-muted: #78716c;
+    --fieldcrm-muted2: #a8a29e;
+  }
+
+  html.dark {
+    --fieldcrm-bg: #1a1a1a;
+    --fieldcrm-panel: #2a2a2a;
+    --fieldcrm-panel-2: #1f1f1f;
+    --fieldcrm-border: #3a3a3a;
+    --fieldcrm-text: #e5e5e5;
+    --fieldcrm-muted: #bdbdbd;
+    --fieldcrm-muted2: #a8a29e;
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
   
   body {
-    @apply font-sans text-field-black bg-field-cream dark:bg-field-black dark:text-white;
+    @apply font-sans;
+    background-color: var(--fieldcrm-bg);
+    color: var(--fieldcrm-text);
   }
+
+  /* Map existing text/bg utility classes into dark theme */
+  .dark .text-field-black { color: var(--fieldcrm-text) !important; }
+  .dark .text-field-stone { color: var(--fieldcrm-muted) !important; }
+  .dark .text-field-stone-light { color: var(--fieldcrm-muted2) !important; }
+
+  .dark .bg-white { background-color: var(--fieldcrm-panel) !important; }
+  .dark .bg-field-cream { background-color: var(--fieldcrm-bg) !important; }
+  .dark .bg-field-sand { background-color: var(--fieldcrm-panel-2) !important; }
+  .dark .bg-gray-50 { background-color: var(--fieldcrm-panel-2) !important; }
+
+  .dark .border-gray-200 { border-color: var(--fieldcrm-border) !important; }
+  .dark .border-gray-100 { border-color: var(--fieldcrm-border) !important; }
   
   /* Custom scrollbar */
   ::-webkit-scrollbar {
@@ -28,6 +63,14 @@
   
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-gray-400;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
   }
 }
 
@@ -72,6 +115,31 @@
   
   .nav-item.active {
     @apply bg-field-sand text-field-black font-semibold;
+  }
+
+  /* Dark theme component overrides */
+  html.dark .btn-secondary {
+    @apply bg-field-black text-white border-gray-700 hover:bg-field-dark;
+  }
+
+  html.dark .card {
+    @apply bg-field-dark border-gray-700 hover:border-gray-600;
+  }
+
+  html.dark .card-static {
+    @apply bg-field-dark border-gray-700;
+  }
+
+  html.dark .input {
+    @apply bg-field-dark border-gray-700 text-gray-200 placeholder:text-gray-400;
+  }
+
+  html.dark .nav-item {
+    @apply text-gray-200 hover:bg-field-black;
+  }
+
+  html.dark .nav-item.active {
+    @apply bg-field-black text-gray-200;
   }
 }
 

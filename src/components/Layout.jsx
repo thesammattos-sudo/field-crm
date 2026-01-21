@@ -39,7 +39,7 @@ export default function Layout() {
   const navigate = useNavigate()
   const { user, profile, role, signOut } = useAuth()
 
-  const displayName = profile?.full_name || profile?.name || user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'User'
+  const displayName = profile?.name || profile?.full_name || user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || 'User'
   const initials = String(displayName || 'U')
     .split(' ')
     .filter(Boolean)
@@ -251,7 +251,7 @@ export default function Layout() {
 
       {/* Sidebar */}
       <aside className={clsx(
-        "fixed top-0 left-0 bottom-0 w-[280px] bg-white border-r border-gray-200 z-50 transition-transform duration-300 lg:translate-x-0",
+        "fixed top-0 left-0 bottom-0 w-[280px] bg-white dark:bg-field-dark border-r border-gray-200 dark:border-gray-800 z-50 transition-transform duration-300 lg:translate-x-0",
         sidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="flex flex-col h-full">
@@ -329,7 +329,7 @@ export default function Layout() {
       {/* Main content */}
       <main className="lg:ml-[280px] min-h-screen">
         {/* Global header */}
-        <header className="sticky top-0 z-30 bg-white border-b border-gray-200">
+        <header className="sticky top-0 z-30 bg-white dark:bg-field-dark border-b border-gray-200 dark:border-gray-800">
           <div className="px-4 lg:px-8 py-3">
             <div className="flex items-center gap-3">
               <button
@@ -342,7 +342,7 @@ export default function Layout() {
 
               <div className="relative flex-1 max-w-xl">
                 <div className={clsx(
-                  "flex items-center gap-2 bg-field-sand/60 border border-gray-200 rounded-xl px-3 py-2 transition-colors",
+                  "flex items-center gap-2 bg-field-sand/60 dark:bg-field-black border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 transition-colors",
                   open && "bg-white"
                 )}>
                   <Search className="w-4 h-4 text-field-stone" />
@@ -353,7 +353,7 @@ export default function Layout() {
                     onBlur={() => {
                       blurTimer.current = window.setTimeout(() => setOpen(false), 150)
                     }}
-                    className="w-full bg-transparent outline-none text-sm text-field-black placeholder:text-field-stone"
+                    className="w-full bg-transparent outline-none text-sm text-field-black placeholder:text-field-stone dark:placeholder:text-gray-400"
                     placeholder="Search leads, suppliers, documents, activities…"
                   />
                   {searching && <span className="text-[11px] text-field-stone">Searching…</span>}
@@ -361,7 +361,7 @@ export default function Layout() {
 
                 {open && trimmed.length >= 2 && (
                   <div
-                    className="absolute left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden"
+                    className="absolute left-0 right-0 mt-2 bg-white dark:bg-field-dark border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg overflow-hidden"
                     onMouseDown={() => {
                       // prevent input blur while clicking results
                       if (blurTimer.current) window.clearTimeout(blurTimer.current)

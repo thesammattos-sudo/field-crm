@@ -297,13 +297,14 @@ export default function Documents() {
           >
             <div
               style={{
-                backgroundColor: 'white',
+                backgroundColor: 'var(--fieldcrm-panel)',
                 borderRadius: '8px',
                 padding: '24px',
                 width: '100%',
                 maxWidth: '450px',
                 maxHeight: '85vh',
                 overflowY: 'auto',
+                color: 'var(--fieldcrm-text)',
               }}
               onClick={(e) => e.stopPropagation()}
             >

@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
         const fallback = {
           id: targetUser.id,
           email: targetUser.email || null,
-          full_name: targetUser.user_metadata?.full_name || targetUser.user_metadata?.name || null,
+          name: targetUser.user_metadata?.name || targetUser.user_metadata?.full_name || null,
           role: 'owner',
         }
         setProfile(fallback)
@@ -45,24 +45,24 @@ export function AuthProvider({ children }) {
     return { data: fetchRes.data || null, error: null }
   }
 
-  async function updateProfile({ full_name, email }) {
+  async function updateProfile({ name, email }) {
     if (!user) return { error: new Error('Not signed in') }
 
-    const trimmedName = typeof full_name === 'string' ? full_name.trim() : ''
+    const trimmedName = typeof name === 'string' ? name.trim() : ''
     const trimmedEmail = typeof email === 'string' ? email.trim() : ''
 
     // 1) Update profiles table (if it exists)
     let nextProfile = {
       ...(profile || {}),
       id: user.id,
-      full_name: trimmedName || null,
+      name: trimmedName || null,
       email: trimmedEmail || user.email || null,
     }
 
     const updateRes = await supabase
       .from('profiles')
       .update({
-        full_name: trimmedName || null,
+        name: trimmedName || null,
         email: trimmedEmail || null,
         updated_at: new Date().toISOString(),
       })
@@ -83,7 +83,7 @@ export function AuthProvider({ children }) {
     // Note: Email changes can require verification, and may fail depending on Supabase settings.
     let authErr = null
     const updates = {}
-    if (trimmedName) updates.data = { full_name: trimmedName }
+    if (trimmedName) updates.data = { name: trimmedName }
     if (trimmedEmail && trimmedEmail !== user.email) updates.email = trimmedEmail
 
     if (Object.keys(updates).length > 0) {
@@ -154,7 +154,7 @@ export function AuthProvider({ children }) {
         setProfile({
           id: user.id,
           email: user.email || null,
-          full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+          name: user.user_metadata?.name || user.user_metadata?.full_name || null,
           role: defaultRole,
         })
         return
@@ -166,8 +166,8 @@ export function AuthProvider({ children }) {
       }
 
       const displayName =
-        user.user_metadata?.full_name ||
         user.user_metadata?.name ||
+        user.user_metadata?.full_name ||
         (user.email ? String(user.email).split('@')[0] : null)
 
       const insertRes = await supabase
@@ -175,7 +175,7 @@ export function AuthProvider({ children }) {
         .insert({
           id: user.id,
           email: user.email || null,
-          full_name: displayName,
+          name: displayName,
           role: defaultRole,
           created_at: new Date().toISOString(),
         })
@@ -189,7 +189,7 @@ export function AuthProvider({ children }) {
         setProfile({
           id: user.id,
           email: user.email || null,
-          full_name: displayName,
+          name: displayName,
           role: defaultRole,
         })
         return
@@ -198,7 +198,7 @@ export function AuthProvider({ children }) {
       setProfile(insertRes.data || {
         id: user.id,
         email: user.email || null,
-        full_name: displayName,
+        name: displayName,
         role: defaultRole,
       })
     }

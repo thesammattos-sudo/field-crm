@@ -41,13 +41,14 @@ export default function ConfirmDialog({
       >
         <div
           style={{
-            backgroundColor: 'white',
+            backgroundColor: 'var(--fieldcrm-panel)',
             borderRadius: '8px',
             padding: '24px',
             width: '100%',
             maxWidth: '420px',
             maxHeight: '85vh',
             overflowY: 'auto',
+            color: 'var(--fieldcrm-text)',
           }}
           onClick={(e) => e.stopPropagation()}
         >

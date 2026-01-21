@@ -408,13 +408,14 @@ export default function ProjectDetail() {
             padding: '16px',
           }} onClick={closeEditModal}>
             <div style={{
-              backgroundColor: 'white',
+              backgroundColor: 'var(--fieldcrm-panel)',
               borderRadius: '8px',
               padding: '24px',
               width: '100%',
               maxWidth: '700px',
               maxHeight: '85vh',
               overflowY: 'auto',
+              color: 'var(--fieldcrm-text)',
             }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Edit Project</h2>

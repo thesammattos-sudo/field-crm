@@ -26,6 +26,9 @@ export default function SettingsModal({ open, onClose }) {
   const [pwMsg, setPwMsg] = useState('')
   const [pwErr, setPwErr] = useState('')
 
+  // Dark mode
+  const [darkMode, setDarkMode] = useState(false)
+
   // Add new user (owner-only)
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
@@ -56,13 +59,16 @@ export default function SettingsModal({ open, onClose }) {
     setNewUserMsg('')
     setNewUserErr('')
 
-    const pName = profile?.full_name || profile?.name || user?.user_metadata?.full_name || user?.user_metadata?.name || ''
+    const pName = profile?.name || profile?.full_name || user?.user_metadata?.name || user?.user_metadata?.full_name || ''
     setFullName(pName)
     setNewPassword('')
     setConfirmPassword('')
     setNewUserEmail('')
     setNewUserPassword('')
     setNewUserRole('sales_rep')
+
+    const theme = typeof window !== 'undefined' ? window.localStorage.getItem('fieldcrm_theme') : null
+    setDarkMode(theme === 'dark')
   }, [open, user, profile])
 
   useEffect(() => {
@@ -82,7 +88,7 @@ export default function SettingsModal({ open, onClose }) {
     setProfileErr('')
     setProfileMsg('')
 
-    const { error } = await updateProfile({ full_name: fullName, email: user?.email || '' })
+    const { error } = await updateProfile({ name: fullName, email: user?.email || '' })
     if (error) {
       setProfileErr(error.message || 'Could not update profile.')
       setProfileSaving(false)
@@ -172,7 +178,7 @@ export default function SettingsModal({ open, onClose }) {
         .upsert({
           id: newUserId,
           email,
-          full_name: null,
+          name: null,
           role: roleValue,
           created_at: new Date().toISOString(),
         })
@@ -195,6 +201,16 @@ export default function SettingsModal({ open, onClose }) {
     setNewUserPassword('')
     setNewUserRole('sales_rep')
     setNewUserSaving(false)
+  }
+
+  function toggleDarkMode(next) {
+    setDarkMode(next)
+    try {
+      window.localStorage.setItem('fieldcrm_theme', next ? 'dark' : 'light')
+    } catch {}
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', !!next)
+    }
   }
 
   return (
@@ -220,13 +236,14 @@ export default function SettingsModal({ open, onClose }) {
       >
         <div
           style={{
-            backgroundColor: 'white',
+            backgroundColor: 'var(--fieldcrm-panel)',
             borderRadius: '8px',
             padding: '24px',
             width: '100%',
             maxWidth: '560px',
             maxHeight: '85vh',
             overflowY: 'auto',
+            color: 'var(--fieldcrm-text)',
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -384,6 +401,31 @@ export default function SettingsModal({ open, onClose }) {
               </form>
             </div>
           )}
+
+          {/* Dark mode */}
+          <div className="border-t border-gray-100 pt-6">
+            <h3 className="font-semibold text-field-black">Appearance</h3>
+            <p className="text-sm text-field-stone mt-1">Toggle dark mode for the whole app.</p>
+
+            <div className="mt-3 card-static p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-field-black">Dark mode</p>
+                  <p className="text-sm text-field-stone mt-1">
+                    Uses a dark gray background and lighter text.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={darkMode}
+                    onChange={(e) => toggleDarkMode(e.target.checked)}
+                  />
+                  {darkMode ? 'On' : 'Off'}
+                </label>
+              </div>
+            </div>
+          </div>
 
           {/* 4) Close button */}
           <div className="flex items-center justify-end gap-3 pt-6">

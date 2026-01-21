@@ -287,13 +287,14 @@ export default function Suppliers() {
             padding: '16px',
           }} onClick={() => setSelected(null)}>
             <div style={{
-              backgroundColor: 'white',
+              backgroundColor: 'var(--fieldcrm-panel)',
               borderRadius: '8px',
               padding: '24px',
               width: '100%',
               maxWidth: '500px',
               maxHeight: '85vh',
               overflowY: 'auto',
+              color: 'var(--fieldcrm-text)',
             }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>{selectedSupplier.name}</h2>
@@ -401,13 +402,14 @@ export default function Suppliers() {
           >
             <div
               style={{
-                backgroundColor: 'white',
+                backgroundColor: 'var(--fieldcrm-panel)',
                 borderRadius: '8px',
                 padding: '24px',
                 width: '100%',
                 maxWidth: '450px',
                 maxHeight: '85vh',
                 overflowY: 'auto',
+                color: 'var(--fieldcrm-text)',
               }}
               onClick={(e) => e.stopPropagation()}
             >
