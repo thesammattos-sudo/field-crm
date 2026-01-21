@@ -35,6 +35,36 @@ function formatUsdCompact(amount) {
   return `$${Math.round(n).toLocaleString()}`
 }
 
+const stageIdSet = new Set(pipelineStages.map(s => s.id))
+const stageLabelToId = Object.fromEntries(
+  pipelineStages.map(s => [String(s.label || '').trim().toLowerCase(), s.id])
+)
+
+function normalizeStageId(raw) {
+  const rawStr = String(raw ?? '').trim()
+  if (!rawStr) return 'new'
+  if (stageIdSet.has(rawStr)) return rawStr
+  const lower = rawStr.toLowerCase()
+  if (stageIdSet.has(lower)) return lower
+  if (stageLabelToId[lower]) return stageLabelToId[lower]
+
+  const token = lower.replace(/[-\s]+/g, '_')
+  if (stageIdSet.has(token)) return token
+
+  const special = {
+    booked: 'won',
+    won: 'won',
+    closed_won: 'won',
+    closedwon: 'won',
+    closed_lost: 'lost',
+    closedlost: 'lost',
+    pdf: 'pdf_sent',
+  }
+  if (special[token]) return special[token]
+
+  return 'new'
+}
+
 function parseBudgetForTotal(value) {
   if (value == null) return 0
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -127,6 +157,8 @@ export default function Dashboard() {
     async function fetchDashboardData() {
       setLoading(true)
       setError('')
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] Fetching dashboard data…')
 
       const [projectsRes, leadsRes, activitiesRes, documentsRes] = await Promise.all([
         (async () => {
@@ -161,6 +193,15 @@ export default function Dashboard() {
       ])
 
       if (cancelled) return
+
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] leadsRes', { error: leadsRes.error, count: Array.isArray(leadsRes.data) ? leadsRes.data.length : null })
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] sample lead row', Array.isArray(leadsRes.data) ? leadsRes.data[0] : null)
+      // eslint-disable-next-line no-console
+      console.log('[Dashboard] raw stage values', Array.isArray(leadsRes.data)
+        ? Array.from(new Set((leadsRes.data || []).map(l => (l?.stage ?? l?.stage_label ?? l?.stageLabel ?? l?.stage_id ?? l?.stageId ?? '')))).slice(0, 25)
+        : [])
 
       const nextError =
         (projectsRes.error && !looksLikeMissingRelationError(projectsRes.error.message, 'projects') ? projectsRes.error.message : '') ||
@@ -256,11 +297,26 @@ export default function Dashboard() {
     return (leads || []).map(l => ({
       id: l.id,
       name: l.name || '',
-      stage: l.stage || 'new',
+      stage: normalizeStageId(l.stage ?? l.stage_id ?? l.stageId ?? l.stage_label ?? l.stageLabel ?? 'new'),
+      stageRaw: l.stage ?? l.stage_id ?? l.stageId ?? l.stage_label ?? l.stageLabel ?? null,
       budget: l.budget ?? l.budget_display ?? l.budgetDisplay ?? 0,
       lastContactDate: l.last_contact_date ?? l.lastContactDate ?? null,
     }))
   }, [leads])
+
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[Dashboard] leads state updated', { count: (leads || []).length })
+  }, [leads])
+
+  useEffect(() => {
+    const dist = normalizedLeads.reduce((acc, l) => {
+      acc[l.stage] = (acc[l.stage] || 0) + 1
+      return acc
+    }, {})
+    // eslint-disable-next-line no-console
+    console.log('[Dashboard] normalized stage distribution', dist)
+  }, [normalizedLeads])
 
   const todayActivities = useMemo(() => {
     const isToday = (dateValue) => {
@@ -596,7 +652,13 @@ export default function Dashboard() {
             </div>
             <div className="flex gap-2 overflow-x-auto pb-2">
               {pipelineStages.slice(0, 6).map(stage => {
-                const count = normalizedLeads.filter(l => l.stage === stage.id).length
+                const count = normalizedLeads.filter(l => {
+                  const raw = String(l.stageRaw ?? l.stage ?? '').trim().toLowerCase()
+                  const label = String(stage.label || '').trim().toLowerCase()
+                  const id = String(stage.id || '').trim().toLowerCase()
+                  if (!raw) return id === 'new'
+                  return raw === id || raw === label || normalizeStageId(raw) === id
+                }).length
                 return (
                   <div 
                     key={stage.id} 
