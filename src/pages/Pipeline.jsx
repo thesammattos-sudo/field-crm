@@ -636,7 +636,20 @@ export default function Pipeline() {
                 <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>
                   {editingLead ? 'Lead Details' : 'Add Lead'}
                 </h2>
-                <button type="button" onClick={closeModal} disabled={saving}>✕</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {editingLead && (
+                    <button
+                      type="button"
+                      onClick={viewActivitiesForLead}
+                      disabled={saving}
+                      className="text-sm font-medium text-field-stone hover:text-field-black hover:underline"
+                      style={{ background: 'transparent', padding: 0 }}
+                    >
+                      View Activities →
+                    </button>
+                  )}
+                  <button type="button" onClick={closeModal} disabled={saving}>✕</button>
+                </div>
               </div>
 
               {error && (
@@ -890,13 +903,6 @@ export default function Pipeline() {
                   >
                     <MessageCircle className="w-4 h-4" /> WhatsApp
                   </a>
-                  <button
-                    type="button"
-                    className="btn-secondary w-full mt-3"
-                    onClick={viewActivitiesForLead}
-                  >
-                    View Activities
-                  </button>
                   <p className="text-xs text-field-stone mt-2">
                     Current stage: {stageLabelById[form.stage] || form.stage}
                   </p>
