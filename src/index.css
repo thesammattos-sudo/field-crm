@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  body {
+    @apply font-sans text-field-black bg-field-cream;
+  }
+  
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 rounded;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center bg-field-black text-white px-5 py-3 rounded-lg font-semibold text-sm 
+           tracking-wide transition-all duration-150 hover:bg-field-dark 
+           active:scale-[0.98];
+  }
+  
+  .btn-secondary {
+    @apply inline-flex items-center justify-center bg-field-sand text-field-black border border-gray-200 px-5 py-3 
+           rounded-lg font-medium text-sm transition-all duration-150 
+           hover:bg-gray-100 active:scale-[0.98];
+  }
+  
+  .btn-gold {
+    @apply inline-flex items-center justify-center bg-gradient-to-r from-field-gold to-field-gold-dark text-white px-5 py-3 
+           rounded-lg font-semibold text-sm tracking-wide transition-all duration-150 
+           hover:shadow-lg active:scale-[0.98];
+  }
+  
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 transition-all duration-200 
+           hover:border-gray-300 hover:shadow-md;
+  }
+  
+  .card-static {
+    @apply bg-white rounded-xl border border-gray-200;
+  }
+  
+  .input {
+    @apply w-full px-4 py-2.5 rounded-lg border border-gray-200 text-sm 
+           focus:outline-none focus:ring-2 focus:ring-field-gold/20 focus:border-field-gold
+           transition-all duration-150;
+  }
+  
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-sm
+           text-field-black transition-all duration-150 hover:bg-field-sand;
+  }
+  
+  .nav-item.active {
+    @apply bg-field-sand text-field-black font-semibold;
+  }
+}
+
+@layer utilities {
+  .animate-delay-100 { animation-delay: 0.1s; }
+  .animate-delay-200 { animation-delay: 0.2s; }
+  .animate-delay-300 { animation-delay: 0.3s; }
+  .animate-delay-400 { animation-delay: 0.4s; }
+  .animate-delay-500 { animation-delay: 0.5s; }
+}
