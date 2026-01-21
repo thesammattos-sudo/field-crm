@@ -7,6 +7,43 @@ import clsx from 'clsx'
 import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 
+const stageIdSet = new Set(pipelineStages.map(s => s.id))
+const stageLabelToId = Object.fromEntries(
+  pipelineStages.map(s => [String(s.label || '').trim().toLowerCase(), s.id])
+)
+
+function normalizeStageId(raw) {
+  const rawStr = String(raw ?? '').trim()
+  if (!rawStr) return 'new'
+
+  // If it's already a stage id, keep it.
+  if (stageIdSet.has(rawStr)) return rawStr
+  const rawLower = rawStr.toLowerCase()
+  if (stageIdSet.has(rawLower)) return rawLower
+
+  // If it's a label (e.g. "Qualified", "PDF Sent"), map to id.
+  if (stageLabelToId[rawLower]) return stageLabelToId[rawLower]
+
+  // Normalize common variants (spaces/hyphens) -> underscores.
+  const token = rawLower.replace(/[-\s]+/g, '_')
+  if (stageIdSet.has(token)) return token
+  const tokenAsLabel = token.replace(/_/g, ' ')
+  if (stageLabelToId[tokenAsLabel]) return stageLabelToId[tokenAsLabel]
+
+  // Known special cases.
+  const special = {
+    booked: 'won',
+    won: 'won',
+    closed_won: 'won',
+    closedwon: 'won',
+    pdf: 'pdf_sent',
+  }
+  if (special[token]) return special[token]
+
+  // Fallback: keep pipeline usable.
+  return 'new'
+}
+
 const emptyLeadForm = {
   name: '',
   email: '',
@@ -85,6 +122,7 @@ export default function Pipeline() {
     const interestedUnit = row.interestedUnit ?? row.interested_unit ?? ''
     const budgetDisplay = row.budget_display ?? row.budgetDisplay ?? row.budget ?? ''
     const lastContactDate = row.last_contact_date ?? row.lastContactDate ?? ''
+    const rawStage = row.stage ?? row.stage_id ?? row.stageId ?? row.stage_label ?? row.stageLabel ?? ''
 
     return {
       uid: `db-${row.id}`,
@@ -93,7 +131,7 @@ export default function Pipeline() {
       name: row.name ?? '',
       email: row.email ?? null,
       phone: row.phone ?? '',
-      stage: row.stage ?? 'new',
+      stage: normalizeStageId(rawStage),
       priority: row.priority ?? 'medium',
       source: row.source ?? 'Website',
       budgetDisplay,
@@ -107,24 +145,32 @@ export default function Pipeline() {
   }
 
   async function fetchLeadsFromSupabase() {
-    setLoading(true)
     setError('')
+
+    console.log('Fetching leads from Supabase...')
 
     let res = await supabase.from('leads').select('*').order('created_at', { ascending: false })
     if (res.error && looksLikeMissingColumnError(res.error.message)) {
       res = await supabase.from('leads').select('*')
     }
 
+    console.log('Leads:', res.data)
+    console.log('Error:', res.error)
+
     if (res.error) {
       const msg = res.error.message || 'Failed to load leads.'
       if (!looksLikeMissingRelationError(msg)) setError(msg)
-      setLoading(false)
       return
     }
 
     const dbLeads = (res.data || []).map(normalizeDbLead)
+    console.log('Normalized leads:', dbLeads)
+    console.log('Lead count:', dbLeads.length)
+    console.log('Stage distribution:', dbLeads.reduce((acc, l) => {
+      acc[l.stage] = (acc[l.stage] || 0) + 1
+      return acc
+    }, {}))
     setLeads(dbLeads)
-    setLoading(false)
   }
 
   async function fetchActivitiesForPipeline() {
@@ -146,9 +192,13 @@ export default function Pipeline() {
   }
 
   useEffect(() => {
+    const fetchLeads = async () => {
+      await fetchLeadsFromSupabase()
+    }
+
     ;(async () => {
       setLoading(true)
-      await Promise.all([fetchLeadsFromSupabase(), fetchActivitiesForPipeline()])
+      await Promise.all([fetchLeads(), fetchActivitiesForPipeline()])
       setLoading(false)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
