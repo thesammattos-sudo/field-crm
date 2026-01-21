@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import clsx from 'clsx'
+import { createClient } from '@supabase/supabase-js'
 import ModalPortal from './ModalPortal'
-import { supabase } from '../lib/supabase'
+import { supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
 function looksLikeMissingRelationError(message, table) {
@@ -10,38 +10,14 @@ function looksLikeMissingRelationError(message, table) {
 }
 
 export default function SettingsModal({ open, onClose }) {
-  const { user, profile, role, updateProfile, updatePassword } = useAuth()
-
-  const canManageUsers = role === 'owner'
-
-  const tabs = useMemo(() => {
-    const base = [
-      { id: 'profile', label: 'User settings' },
-      ...(canManageUsers ? [{ id: 'users', label: 'Users' }] : []),
-      { id: 'password', label: 'Password' },
-      { id: 'app', label: 'App settings' },
-    ]
-    return base
-  }, [canManageUsers])
-
-  const [tab, setTab] = useState('profile')
+  const { user, profile, role, updateProfile, updatePassword, refreshProfile } = useAuth()
+  const isOwner = role === 'owner'
 
   // Profile form
   const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileMsg, setProfileMsg] = useState('')
   const [profileErr, setProfileErr] = useState('')
-
-  // Users management
-  const [usersLoading, setUsersLoading] = useState(false)
-  const [usersErr, setUsersErr] = useState('')
-  const [users, setUsers] = useState([])
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState('sales_rep')
-  const [inviteSaving, setInviteSaving] = useState(false)
-  const [inviteMsg, setInviteMsg] = useState('')
-  const [inviteErr, setInviteErr] = useState('')
 
   // Password form
   const [newPassword, setNewPassword] = useState('')
@@ -50,29 +26,44 @@ export default function SettingsModal({ open, onClose }) {
   const [pwMsg, setPwMsg] = useState('')
   const [pwErr, setPwErr] = useState('')
 
-  // App settings
-  const [darkMode, setDarkMode] = useState(false)
+  // Add new user (owner-only)
+  const [newUserEmail, setNewUserEmail] = useState('')
+  const [newUserPassword, setNewUserPassword] = useState('')
+  const [newUserRole, setNewUserRole] = useState('sales_rep')
+  const [newUserSaving, setNewUserSaving] = useState(false)
+  const [newUserMsg, setNewUserMsg] = useState('')
+  const [newUserErr, setNewUserErr] = useState('')
+
+  const isolatedAuthClient = useMemo(() => {
+    // Separate client so creating users does NOT overwrite the current session.
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey: 'fieldcrm_user_create',
+      },
+    })
+  }, [])
 
   useEffect(() => {
     if (!open) return
     // reset ephemeral messages when opening
     setProfileMsg('')
     setProfileErr('')
-    setInviteMsg('')
-    setInviteErr('')
     setPwMsg('')
     setPwErr('')
-
-    setTab(canManageUsers ? tab : (tab === 'users' ? 'profile' : tab))
+    setNewUserMsg('')
+    setNewUserErr('')
 
     const pName = profile?.full_name || profile?.name || user?.user_metadata?.full_name || user?.user_metadata?.name || ''
-    const pEmail = profile?.email || user?.email || ''
     setFullName(pName)
-    setEmail(pEmail)
-
-    const theme = typeof window !== 'undefined' ? window.localStorage.getItem('fieldcrm_theme') : null
-    setDarkMode(theme === 'dark')
-  }, [open, user, profile, canManageUsers]) // intentionally not depending on `tab`
+    setNewPassword('')
+    setConfirmPassword('')
+    setNewUserEmail('')
+    setNewUserPassword('')
+    setNewUserRole('sales_rep')
+  }, [open, user, profile])
 
   useEffect(() => {
     if (!open) return
@@ -83,47 +74,6 @@ export default function SettingsModal({ open, onClose }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  useEffect(() => {
-    if (!open) return
-    if (tab !== 'users') return
-    if (!canManageUsers) return
-
-    let cancelled = false
-    async function loadUsers() {
-      setUsersLoading(true)
-      setUsersErr('')
-      const res = await supabase
-        .from('profiles')
-        .select('id,email,full_name,role,created_at')
-        .order('created_at', { ascending: true })
-
-      if (cancelled) return
-
-      if (res.error) {
-        const msg = res.error.message || ''
-        if (looksLikeMissingRelationError(msg, 'profiles')) {
-          setUsers([{
-            id: profile?.id || user?.id || 'me',
-            email: profile?.email || user?.email || '',
-            full_name: profile?.full_name || user?.user_metadata?.full_name || '',
-            role: role || 'owner',
-          }])
-        } else {
-          setUsersErr(res.error.message || 'Failed to load users.')
-          setUsers([])
-        }
-        setUsersLoading(false)
-        return
-      }
-
-      setUsers(Array.isArray(res.data) ? res.data : [])
-      setUsersLoading(false)
-    }
-
-    loadUsers()
-    return () => { cancelled = true }
-  }, [open, tab, canManageUsers, profile?.id, profile?.email, profile?.full_name, role, user?.id, user?.email, user?.user_metadata?.full_name])
-
   if (!open) return null
 
   async function saveProfile(e) {
@@ -132,13 +82,14 @@ export default function SettingsModal({ open, onClose }) {
     setProfileErr('')
     setProfileMsg('')
 
-    const { error } = await updateProfile({ full_name: fullName, email })
+    const { error } = await updateProfile({ full_name: fullName, email: user?.email || '' })
     if (error) {
       setProfileErr(error.message || 'Could not update profile.')
       setProfileSaving(false)
       return
     }
 
+    await refreshProfile?.()
     setProfileMsg('Saved.')
     setProfileSaving(false)
   }
@@ -173,70 +124,77 @@ export default function SettingsModal({ open, onClose }) {
     setPwSaving(false)
   }
 
-  function toggleDarkMode(next) {
-    setDarkMode(next)
-    try {
-      window.localStorage.setItem('fieldcrm_theme', next ? 'dark' : 'light')
-    } catch {}
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', !!next)
-    }
-  }
-
-  async function updateUserRole(userId, nextRole) {
-    // optimistic UI
-    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, role: nextRole } : u)))
-    const res = await supabase
-      .from('profiles')
-      .update({ role: nextRole, updated_at: new Date().toISOString() })
-      .eq('id', userId)
-
-    if (res.error) {
-      // revert by reloading list if possible
-      setUsersErr(res.error.message || 'Failed to update role.')
-    }
-  }
-
-  async function invite(e) {
+  async function createNewUser(e) {
     e.preventDefault()
-    setInviteSaving(true)
-    setInviteErr('')
-    setInviteMsg('')
+    if (!isOwner) return
 
-    const targetEmail = inviteEmail.trim()
-    if (!targetEmail) {
-      setInviteErr('Email is required.')
-      setInviteSaving(false)
+    setNewUserSaving(true)
+    setNewUserErr('')
+    setNewUserMsg('')
+
+    const email = newUserEmail.trim()
+    const password = newUserPassword
+    const roleValue = newUserRole
+
+    if (!email) {
+      setNewUserErr('Email is required.')
+      setNewUserSaving(false)
+      return
+    }
+    if (!password || password.length < 8) {
+      setNewUserErr('Password must be at least 8 characters.')
+      setNewUserSaving(false)
       return
     }
 
-    // Client-side apps cannot securely invite via Supabase Admin API.
-    // We store an invite request if an `invites` table exists; otherwise we show a helpful message.
-    const res = await supabase
-      .from('invites')
-      .insert({
-        email: targetEmail,
-        role: inviteRole,
-        invited_by: user?.id || null,
-        created_at: new Date().toISOString(),
-        status: 'pending',
-      })
+    const signUpRes = await isolatedAuthClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          role: roleValue,
+        },
+      },
+    })
 
-    if (res.error) {
-      const msg = res.error.message || ''
-      if (looksLikeMissingRelationError(msg, 'invites')) {
-        setInviteErr('Invites require backend setup (missing "invites" table / server-side invite flow).')
+    if (signUpRes.error) {
+      setNewUserErr(signUpRes.error.message || 'Failed to create user.')
+      setNewUserSaving(false)
+      return
+    }
+
+    const newUserId = signUpRes.data?.user?.id || null
+
+    // Try to create a profile row for the new user (requires RLS/policy allowing owners).
+    if (newUserId) {
+      const upsertRes = await supabase
+        .from('profiles')
+        .upsert({
+          id: newUserId,
+          email,
+          full_name: null,
+          role: roleValue,
+          created_at: new Date().toISOString(),
+        })
+
+      if (upsertRes.error) {
+        const msg = upsertRes.error.message || ''
+        if (looksLikeMissingRelationError(msg, 'profiles')) {
+          setNewUserMsg('User created in Auth. Profiles table is missing, so role will default on first login.')
+        } else {
+          setNewUserMsg('User created in Auth. Could not set role in profiles due to permissions/policy.')
+        }
       } else {
-        setInviteErr(res.error.message || 'Failed to create invite.')
+        setNewUserMsg('User created.')
       }
-      setInviteSaving(false)
-      return
+    } else {
+      setNewUserMsg('User created.')
     }
 
-    setInviteMsg('Invite created.')
-    setInviteEmail('')
-    setInviteRole('sales_rep')
-    setInviteSaving(false)
+    setNewUserEmail('')
+    setNewUserPassword('')
+    setNewUserRole('sales_rep')
+    setNewUserSaving(false)
   }
 
   return (
@@ -255,7 +213,10 @@ export default function SettingsModal({ open, onClose }) {
           zIndex: 9999,
           padding: '16px',
         }}
-        onClick={() => onClose?.()}
+        onClick={() => {
+          if (profileSaving || pwSaving || newUserSaving) return
+          onClose?.()
+        }}
       >
         <div
           style={{
@@ -263,7 +224,7 @@ export default function SettingsModal({ open, onClose }) {
             borderRadius: '8px',
             padding: '24px',
             width: '100%',
-            maxWidth: '720px',
+            maxWidth: '560px',
             maxHeight: '85vh',
             overflowY: 'auto',
           }}
@@ -279,24 +240,12 @@ export default function SettingsModal({ open, onClose }) {
             <button type="button" onClick={() => onClose?.()} aria-label="Close">✕</button>
           </div>
 
-          <div className="flex flex-wrap gap-2 mb-5">
-            {tabs.map(t => (
-              <button
-                key={t.id}
-                type="button"
-                className={clsx(
-                  "px-3 py-2 rounded-lg text-sm border transition-colors",
-                  tab === t.id ? "bg-field-sand border-gray-200 font-semibold" : "bg-white border-gray-200 hover:bg-field-sand/60"
-                )}
-                onClick={() => setTab(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          {/* 1) User Profile */}
+          <div className="mb-6">
+            <h3 className="font-semibold text-field-black">User Profile</h3>
+            <p className="text-sm text-field-stone mt-1">View and edit your name.</p>
 
-          {tab === 'profile' && (
-            <form onSubmit={saveProfile} className="space-y-4">
+            <form onSubmit={saveProfile} className="mt-3 space-y-4">
               {profileErr && (
                 <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
                   {profileErr}
@@ -308,148 +257,30 @@ export default function SettingsModal({ open, onClose }) {
                 </div>
               )}
 
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-field-stone-light">Name</label>
-                  <input
-                    className="input mt-1"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Your name"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-field-stone-light">Email</label>
-                  <input
-                    type="email"
-                    className="input mt-1"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@company.com"
-                  />
-                  <p className="text-[11px] text-field-stone mt-2">
-                    Changing your login email may require verification depending on your Supabase settings.
-                  </p>
-                </div>
+              <div>
+                <label className="text-xs text-field-stone-light">Name</label>
+                <input
+                  className="input mt-1"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Your name"
+                />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button type="button" className="btn-secondary" onClick={() => onClose?.()} disabled={profileSaving}>
-                  Close
-                </button>
+              <div className="flex items-center justify-end gap-3 pt-1">
                 <button type="submit" className="btn-primary" disabled={profileSaving}>
                   {profileSaving ? 'Saving…' : 'Save'}
                 </button>
               </div>
             </form>
-          )}
+          </div>
 
-          {tab === 'users' && canManageUsers && (
-            <div className="space-y-6">
-              <div>
-                <h3 className="font-semibold text-field-black">Invite user</h3>
-                <p className="text-sm text-field-stone mt-1">
-                  Create an invite request and assign a role.
-                </p>
+          {/* 2) Change Password */}
+          <div className="border-t border-gray-100 pt-6 mb-6">
+            <h3 className="font-semibold text-field-black">Change Password</h3>
+            <p className="text-sm text-field-stone mt-1">Update your login password.</p>
 
-                {inviteErr && (
-                  <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
-                    {inviteErr}
-                  </div>
-                )}
-                {inviteMsg && (
-                  <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
-                    {inviteMsg}
-                  </div>
-                )}
-
-                <form onSubmit={invite} className="mt-3 grid sm:grid-cols-3 gap-3 items-end">
-                  <div className="sm:col-span-2">
-                    <label className="text-xs text-field-stone-light">Email</label>
-                    <input
-                      type="email"
-                      className="input mt-1"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="new.user@company.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-field-stone-light">Role</label>
-                    <select
-                      className="input mt-1"
-                      value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value)}
-                    >
-                      <option value="owner">Owner</option>
-                      <option value="sales_rep">Sales rep</option>
-                    </select>
-                  </div>
-                  <div className="sm:col-span-3 flex justify-end">
-                    <button type="submit" className="btn-primary" disabled={inviteSaving}>
-                      {inviteSaving ? 'Creating…' : 'Invite'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              <div className="border-t border-gray-100 pt-6">
-                <h3 className="font-semibold text-field-black">Manage users</h3>
-                <p className="text-sm text-field-stone mt-1">
-                  View users and adjust their role.
-                </p>
-
-                {usersErr && (
-                  <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
-                    {usersErr}
-                  </div>
-                )}
-
-                <div className="mt-4 card-static overflow-hidden">
-                  <div className="grid grid-cols-12 gap-3 px-4 py-3 border-b border-gray-200 text-[11px] font-semibold text-field-stone-light uppercase tracking-wider">
-                    <div className="col-span-5">User</div>
-                    <div className="col-span-5">Email</div>
-                    <div className="col-span-2">Role</div>
-                  </div>
-
-                  {usersLoading ? (
-                    <div className="px-4 py-4 text-sm text-field-stone">Loading…</div>
-                  ) : users.length === 0 ? (
-                    <div className="px-4 py-4 text-sm text-field-stone">No users found.</div>
-                  ) : (
-                    <div className="divide-y divide-gray-100">
-                      {users.map(u => (
-                        <div key={u.id} className="grid grid-cols-12 gap-3 px-4 py-3 items-center">
-                          <div className="col-span-5">
-                            <div className="text-sm font-medium text-field-black truncate">
-                              {u.full_name || '—'}
-                              {u.id === user?.id && <span className="ml-2 text-[11px] text-field-stone">(you)</span>}
-                            </div>
-                          </div>
-                          <div className="col-span-5">
-                            <div className="text-sm text-field-stone truncate">{u.email || '—'}</div>
-                          </div>
-                          <div className="col-span-2">
-                            <select
-                              className="input !py-2"
-                              value={u.role || 'sales_rep'}
-                              onChange={(e) => updateUserRole(u.id, e.target.value)}
-                            >
-                              <option value="owner">Owner</option>
-                              <option value="sales_rep">Sales rep</option>
-                            </select>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {tab === 'password' && (
-            <form onSubmit={changePassword} className="space-y-4">
+            <form onSubmit={changePassword} className="mt-3 space-y-4">
               {pwErr && (
                 <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
                   {pwErr}
@@ -484,45 +315,87 @@ export default function SettingsModal({ open, onClose }) {
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button type="button" className="btn-secondary" onClick={() => onClose?.()} disabled={pwSaving}>
-                  Close
-                </button>
+              <div className="flex items-center justify-end gap-3 pt-1">
                 <button type="submit" className="btn-primary" disabled={pwSaving}>
                   {pwSaving ? 'Updating…' : 'Update password'}
                 </button>
               </div>
             </form>
-          )}
+          </div>
 
-          {tab === 'app' && (
-            <div className="space-y-4">
-              <div className="card-static p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="font-semibold text-field-black">Dark mode</p>
-                    <p className="text-sm text-field-stone mt-1">
-                      Toggle a darker theme (experimental).
-                    </p>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={darkMode}
-                      onChange={(e) => toggleDarkMode(e.target.checked)}
-                    />
-                    {darkMode ? 'On' : 'Off'}
-                  </label>
+          {/* 3) Add New User (owner only) */}
+          {isOwner && (
+            <div className="border-t border-gray-100 pt-6 mb-2">
+              <h3 className="font-semibold text-field-black">Add New User</h3>
+              <p className="text-sm text-field-stone mt-1">Create a new user and assign a role.</p>
+
+              {newUserErr && (
+                <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+                  {newUserErr}
                 </div>
-              </div>
+              )}
+              {newUserMsg && (
+                <div className="mt-3 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800">
+                  {newUserMsg}
+                </div>
+              )}
 
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button type="button" className="btn-secondary" onClick={() => onClose?.()}>
-                  Close
-                </button>
-              </div>
+              <form onSubmit={createNewUser} className="mt-3 grid sm:grid-cols-3 gap-3 items-end">
+                <div className="sm:col-span-2">
+                  <label className="text-xs text-field-stone-light">Email</label>
+                  <input
+                    type="email"
+                    className="input mt-1"
+                    value={newUserEmail}
+                    onChange={(e) => setNewUserEmail(e.target.value)}
+                    placeholder="new.user@company.com"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-field-stone-light">Role</label>
+                  <select
+                    className="input mt-1"
+                    value={newUserRole}
+                    onChange={(e) => setNewUserRole(e.target.value)}
+                  >
+                    <option value="owner">Owner</option>
+                    <option value="sales_rep">Sales rep</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="text-xs text-field-stone-light">Temporary password</label>
+                  <input
+                    type="password"
+                    className="input mt-1"
+                    value={newUserPassword}
+                    onChange={(e) => setNewUserPassword(e.target.value)}
+                    placeholder="Min 8 characters"
+                    autoComplete="new-password"
+                  />
+                  <p className="text-[11px] text-field-stone mt-2">
+                    Depending on Supabase auth settings, the user may need to confirm their email before signing in.
+                  </p>
+                </div>
+                <div className="sm:col-span-3 flex justify-end pt-1">
+                  <button type="submit" className="btn-primary" disabled={newUserSaving}>
+                    {newUserSaving ? 'Creating…' : 'Create user'}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
+
+          {/* 4) Close button */}
+          <div className="flex items-center justify-end gap-3 pt-6">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => onClose?.()}
+              disabled={profileSaving || pwSaving || newUserSaving}
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </ModalPortal>

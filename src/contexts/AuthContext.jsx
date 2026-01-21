@@ -134,6 +134,8 @@ export function AuthProvider({ children }) {
         return
       }
 
+      const defaultRole = user.user_metadata?.role || 'owner'
+
       // Try to fetch profile. If missing, create it on first login.
       const fetchRes = await supabase
         .from('profiles')
@@ -153,7 +155,7 @@ export function AuthProvider({ children }) {
           id: user.id,
           email: user.email || null,
           full_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
-          role: 'owner',
+          role: defaultRole,
         })
         return
       }
@@ -174,7 +176,7 @@ export function AuthProvider({ children }) {
           id: user.id,
           email: user.email || null,
           full_name: displayName,
-          role: 'owner',
+          role: defaultRole,
           created_at: new Date().toISOString(),
         })
         .select('*')
@@ -188,7 +190,7 @@ export function AuthProvider({ children }) {
           id: user.id,
           email: user.email || null,
           full_name: displayName,
-          role: 'owner',
+          role: defaultRole,
         })
         return
       }
@@ -197,7 +199,7 @@ export function AuthProvider({ children }) {
         id: user.id,
         email: user.email || null,
         full_name: displayName,
-        role: 'owner',
+        role: defaultRole,
       })
     }
 
